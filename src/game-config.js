@@ -3,9 +3,9 @@
 
 const GAME = {
     title: 'DOWZA',
-    subtitle: 'A NEW ARCADE ADVENTURE',
+    subtitle: 'VS. BOWZASHINE',
     version: 'v1',
-    bgColor: '#1a1a2e',
+    bgColor: '#3a0a0a',
 
     // Firebase - see README.md for setup instructions
     // Leave as-is to use local-only high scores
@@ -30,13 +30,16 @@ const GAME = {
     // label: button text
     // keys: keyboard codes that map to this control
     controls: [
-        { id: 'left',  label: 'LEFT',  keys: ['ArrowLeft', 'KeyA'] },
-        { id: 'right', label: 'RIGHT', keys: ['ArrowRight', 'KeyD'] }
+        { id: 'left',  label: '◀',    keys: ['ArrowLeft', 'KeyA'] },
+        { id: 'right', label: '▶',    keys: ['ArrowRight', 'KeyD'] },
+        { id: 'jump',  label: 'JUMP', keys: ['Space', 'ArrowUp', 'KeyW'] },
+        { id: 'fire',  label: 'FIRE', keys: ['KeyJ', 'KeyZ', 'ShiftLeft'] }
     ],
 
     // Desktop instructions (hidden on touch devices)
     instructions: [
-        { label: 'MOVE LEFT', keys: 'Arrow Left or A' },
-        { label: 'MOVE RIGHT', keys: 'Arrow Right or D' }
+        { label: 'MOVE', keys: 'Arrows or A/D' },
+        { label: 'JUMP', keys: 'Space, W, or Up' },
+        { label: 'FIRE', keys: 'J, Z, or Shift' }
     ]
 };
