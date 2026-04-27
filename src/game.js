@@ -1,240 +1,278 @@
-// ==================== GAME LOGIC: BLOCK DODGE ====================
-// Replace this entire file with your own game.
-//
-// You must implement:
-//   gameInit()              - called on game start and restart
-//   gameUpdate(dt)          - called every frame (dt=1.0 at 60fps)
-//   gameRender(ctx, w, h)   - called every frame to draw your game
-//
-// Optional:
-//   gameTitleRender(ctx, w, h, time) - custom title screen art
-//   gameOverRender(ctx, w, h)       - custom game over art
-//
-// Engine API:
-//   Engine.input[id]                           - boolean, matches GAME.controls ids
-//   Engine.state.score                         - set this to update score
-//   Engine.state.health                        - set to 0 to trigger game over
-//   Engine.state.maxHealth                     - max health (for heart display)
-//   Engine.Sound.play('soundName')             - play a sound from SOUNDS
-//   Engine.spawnParticle(x,y,vx,vy,sz,col,life) - spawn a particle
-//   Engine.showScorePopup(x,y,text,color)      - floating score text
+// ==================== DOWZA: GAME ORCHESTRATOR ====================
+// Engine calls (per frame): gameUpdate(dt), gameRender(ctx, w, h),
+// gameTitleRender(ctx, w, h, time), gameOverRender(ctx, w, h).
+// Engine calls gameInit() on game start and on restart (after taking i-frames-
+// triggered HP=0 game over). All entity/world state is rebuilt from scratch
+// in gameInit so restart is clean.
 
-// src/template.html ships with a generic <title>Arcade Game</title>.
-// Set the real browser tab title at module load (NOT inside gameInit,
-// which only runs after the player taps to start) so the title screen
-// already reads GAME.title. game-config.js is concatenated before
-// game.js by build.js so GAME is in scope here.
 document.title = GAME.title;
 
-// Game-specific state
-let player = {};
-let blocks = [];
-let survivalTime = 0;
-let difficulty = 1;
-let nextScoreMilestone = 50;
-
-const GROUND_Y = 190;
-const PLAYER_W = 20;
-const PLAYER_H = 24;
-const PLAYER_SPEED = 4;
+// Track total elapsed frames (used for animation phases in render).
+let gameFrame = 0;
 
 function gameInit() {
-    Engine.state.health = 3;
-    Engine.state.maxHealth = 3;
-    Engine.state.score = 0;
+    // Engine HP UI uses these. Dowza has 6 HP per the brainstorm.
+    Engine.state.health = 6;
+    Engine.state.maxHealth = 6;
+    Engine.state.score = 0;       // suppress engine high-score path
 
-    player = {
-        x: GAME.width / 2,
-        y: GROUND_Y,
-        w: PLAYER_W,
-        h: PLAYER_H,
-        invincible: 60
-    };
+    // Core state
+    Engine.player = makeDowza(LEVEL.playerSpawn.x, LEVEL.playerSpawn.y);
+    Engine.walkers = LEVEL.walkerSpawns.map(makeWalker);
+    Engine.fireballs = [];
+    Engine.shineBlasts = [];
+    Engine.bowzashine = null;     // spawned when Dowza enters arena
+    Engine.arenaTriggered = false;
+    Engine.win = false;
+    Engine.winFrames = 0;
 
-    blocks = [];
-    survivalTime = 0;
-    difficulty = 1;
-    nextScoreMilestone = 50;
+    // Camera
+    Engine.camera = PF_cameraInit();
+
+    // Physics accumulator state for fixed-timestep wrapper
+    Engine.physAcc = { acc: 0 };
+
+    gameFrame = 0;
 }
 
-function gameUpdate(dt) {
-    // Move player
-    if (Engine.input.left) {
-        player.x -= PLAYER_SPEED * dt;
-    }
-    if (Engine.input.right) {
-        player.x += PLAYER_SPEED * dt;
-    }
-    // Clamp to screen
-    player.x = Math.max(player.w / 2, Math.min(GAME.width - player.w / 2, player.x));
+function gameUpdate(engineDt) {
+    PF_step(Engine.physAcc, engineDt, function (dt) {
+        physicsTick(dt);
+    });
+}
 
-    // Invincibility countdown
-    if (player.invincible > 0) player.invincible -= dt;
+function physicsTick(dt) {
+    gameFrame++;
 
-    // Survival scoring
-    survivalTime += dt;
-    if (Math.floor(survivalTime / 60) > Math.floor((survivalTime - dt) / 60)) {
-        Engine.state.score += 1;
-    }
+    const d = Engine.player;
+    if (!d) return;
 
-    // Difficulty ramp: increases every 30 seconds
-    difficulty = 1 + Math.floor(survivalTime / 1800) * 0.5 + (survivalTime % 1800) / 1800 * 0.3;
+    dowzaTick(d, LEVEL);
 
-    // Score milestones
-    if (Engine.state.score >= nextScoreMilestone) {
-        Sound.play('milestone');
-        Engine.showScorePopup(GAME.width / 2, GAME.height / 2 - 20, nextScoreMilestone + '!', '#ffd700');
-        nextScoreMilestone += 50;
+    for (let i = 0; i < Engine.walkers.length; i++) {
+        const w = Engine.walkers[i];
+        walkerTick(w, LEVEL);
+        const keep = resolvePlayerWalker(d, w);
+        if (!keep) { Engine.walkers.splice(i, 1); i--; }
     }
 
-    // Spawn blocks
-    const spawnRate = Math.max(8, 40 - difficulty * 8);
-    if (Math.random() * spawnRate < dt) {
-        const bw = 12 + Math.random() * 20;
-        blocks.push({
-            x: Math.random() * (GAME.width - bw),
-            y: -20,
-            w: bw,
-            h: 12 + Math.random() * 8,
-            speed: 1.5 + Math.random() * difficulty,
-            color: randomBlockColor()
-        });
-    }
-
-    // Update blocks
-    for (let i = blocks.length - 1; i >= 0; i--) {
-        const b = blocks[i];
-        b.y += b.speed * dt;
-
-        // Off screen
-        if (b.y > GAME.height + 20) {
-            blocks.splice(i, 1);
-            continue;
-        }
-
-        // Collision with player
-        if (player.invincible <= 0 && boxOverlap(
-            player.x - player.w / 2, player.y - player.h,
-            player.w, player.h,
-            b.x, b.y, b.w, b.h
-        )) {
-            Engine.state.health--;
-            player.invincible = 90;
-            Sound.play('hit');
-
-            // Impact particles
-            for (let j = 0; j < 8; j++) {
-                Engine.spawnParticle(
-                    b.x + b.w / 2, b.y + b.h / 2,
-                    (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 4,
-                    3 + Math.random() * 3, b.color, 20 + Math.random() * 15
-                );
+    for (let i = 0; i < Engine.fireballs.length; i++) {
+        const fb = Engine.fireballs[i];
+        fireballTick(fb, LEVEL);
+        if (fb.alive) {
+            for (const w of Engine.walkers) {
+                if (resolveFireballWalker(fb, w)) break;
             }
-
-            blocks.splice(i, 1);
         }
+        if (fb.alive && Engine.bowzashine) {
+            resolveFireballBoss(fb, Engine.bowzashine);
+        }
+        if (!fb.alive) { Engine.fireballs.splice(i, 1); i--; }
+    }
+
+    if (!Engine.arenaTriggered && d.x + d.w / 2 >= LEVEL.arena.triggerX) {
+        Engine.arenaTriggered = true;
+        Engine.camera.lockMin = LEVEL.arena.cameraLockMin;
+        Engine.camera.lockMax = LEVEL.arena.cameraLockMax;
+        Engine.bowzashine = makeBowzashine(LEVEL.arena.bossSpawn.x, LEVEL.arena.bossSpawn.y);
+    }
+
+    if (Engine.bowzashine) {
+        bowzashineTick(Engine.bowzashine, d, LEVEL);
+        resolvePlayerBoss(d, Engine.bowzashine);
+    }
+
+    for (let i = 0; i < Engine.shineBlasts.length; i++) {
+        const s = Engine.shineBlasts[i];
+        shineTick(s, LEVEL);
+        if (s.alive) resolvePlayerShine(d, s);
+        if (!s.alive) { Engine.shineBlasts.splice(i, 1); i--; }
+    }
+
+    PF_cameraFollow(Engine.camera, d, LEVEL, GAME.width);
+
+    if (Engine.win) {
+        d.frozen = true;
+        Engine.winFrames++;
     }
 }
 
 function gameRender(ctx, w, h) {
-    // Ground
-    ctx.fillStyle = '#333355';
-    ctx.fillRect(0, GROUND_Y, w, h - GROUND_Y);
-    ctx.fillStyle = '#444477';
-    ctx.fillRect(0, GROUND_Y, w, 2);
+    const camX = PF_cameraSnapX(Engine.camera);
+    const time = gameFrame / 60;
 
-    // Ground pattern
-    ctx.fillStyle = '#2a2a44';
-    for (let gx = 0; gx < w; gx += 16) {
-        ctx.fillRect(gx, GROUND_Y + 6, 8, 4);
-        ctx.fillRect(gx + 8, GROUND_Y + 14, 8, 4);
+    drawBackgroundSky(ctx, w, h);
+    drawBackgroundFar(ctx, w, h, camX);
+    drawBackgroundNear(ctx, w, h, camX, time);
+    drawLevelTiles(ctx, LEVEL, camX, w, h);
+
+    // Decorative arena gate flames (visible when Dowza is near the arena entrance).
+    if (camX + w >= LEVEL.arena.triggerX - 16 && camX <= LEVEL.arena.triggerX + 16) {
+        drawArenaGate(ctx, LEVEL.arena.triggerX - camX, time);
     }
 
-    // Blocks
-    for (const b of blocks) {
-        ctx.fillStyle = b.color;
-        ctx.fillRect(b.x, b.y, b.w, b.h);
-        // Highlight
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.fillRect(b.x, b.y, b.w, 2);
-        // Shadow
-        ctx.fillStyle = 'rgba(0,0,0,0.3)';
-        ctx.fillRect(b.x, b.y + b.h - 2, b.w, 2);
+    for (const wk of Engine.walkers) drawWalker(ctx, wk, camX);
+    for (const fb of Engine.fireballs) drawFireball(ctx, fb, camX);
+    if (Engine.bowzashine) drawBowzashine(ctx, Engine.bowzashine, camX, time);
+    for (const s of Engine.shineBlasts) drawShineBlast(ctx, s, camX);
+    drawDowza(ctx, Engine.player, camX);
+
+    if (Engine.bowzashine && Engine.bowzashine.state !== 'ENTERING' && !Engine.win) {
+        drawBossHpBar(ctx, Engine.bowzashine);
     }
 
-    // Player
-    const px = player.x - player.w / 2;
-    const py = player.y - player.h;
-
-    // Blink when invincible
-    if (player.invincible > 0 && Math.floor(player.invincible / 4) % 2 === 0) {
-        return; // Skip drawing player during blink
+    if (Engine.win) {
+        drawWinScreen(ctx, w, h, Engine.winFrames);
     }
-
-    // Body
-    ctx.fillStyle = '#4488ff';
-    ctx.fillRect(px + 2, py + 8, PLAYER_W - 4, PLAYER_H - 8);
-
-    // Head
-    ctx.fillStyle = '#ffccaa';
-    ctx.fillRect(px + 4, py, PLAYER_W - 8, 10);
-
-    // Eyes
-    ctx.fillStyle = '#222';
-    ctx.fillRect(px + 6, py + 3, 2, 3);
-    ctx.fillRect(px + 12, py + 3, 2, 3);
-
-    // Smile
-    ctx.fillStyle = '#cc6644';
-    ctx.fillRect(px + 7, py + 7, 6, 1);
-
-    // Feet
-    ctx.fillStyle = '#335599';
-    ctx.fillRect(px + 3, py + PLAYER_H - 4, 5, 4);
-    ctx.fillRect(px + PLAYER_W - 8, py + PLAYER_H - 4, 5, 4);
 }
 
 function gameTitleRender(ctx, w, h, time) {
-    // Falling blocks animation on title screen
-    const seed = Math.floor(time * 2);
-    for (let i = 0; i < 8; i++) {
-        const bx = ((i * 53 + seed * 7) % w);
-        const by = ((time * 30 + i * 40) % (h + 20)) - 20;
-        const bw = 10 + (i % 3) * 8;
-        const bh = 10 + (i % 2) * 6;
-        ctx.fillStyle = randomBlockColorFromSeed(i);
-        ctx.globalAlpha = 0.3;
-        ctx.fillRect(bx, by, bw, bh);
+    drawTitleBackdrop(ctx, w, h, time);
+}
+
+function gameOverRender(ctx, w, h) {
+    if (Engine.player && Engine.camera) {
+        const camX = PF_cameraSnapX(Engine.camera);
+        drawBackgroundSky(ctx, w, h);
+        drawBackgroundFar(ctx, w, h, camX);
+        drawLevelTiles(ctx, LEVEL, camX, w, h);
+        for (const wk of Engine.walkers) drawWalker(ctx, wk, camX);
+        if (Engine.bowzashine) drawBowzashine(ctx, Engine.bowzashine, camX, gameFrame / 60);
+        drawDowza(ctx, Engine.player, camX);
     }
-    ctx.globalAlpha = 1;
-
-    // Small player character in the middle
-    const px = w / 2 - 10;
-    const py = GROUND_Y - PLAYER_H;
-    ctx.fillStyle = '#4488ff';
-    ctx.fillRect(px + 2, py + 8, PLAYER_W - 4, PLAYER_H - 8);
-    ctx.fillStyle = '#ffccaa';
-    ctx.fillRect(px + 4, py, PLAYER_W - 8, 10);
-    ctx.fillStyle = '#222';
-    ctx.fillRect(px + 6, py + 3, 2, 3);
-    ctx.fillRect(px + 12, py + 3, 2, 3);
-
-    // Ground
-    ctx.fillStyle = '#333355';
-    ctx.fillRect(0, GROUND_Y, w, h - GROUND_Y);
 }
 
-// Helpers
-function boxOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+// ---- Win screen overlay -------------------------------------------------
+function drawWinScreen(ctx, w, h, winFrames) {
+    const alpha = Math.min(0.7, winFrames / 90);
+    ctx.fillStyle = `rgba(40, 8, 4, ${alpha.toFixed(2)})`;
+    ctx.fillRect(0, 0, w, h);
+
+    if (winFrames < 30) return;
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText('DOWZA WINS!', w / 2 + 2, h / 2 - 18 + 2);
+    ctx.fillStyle = '#ffd700';
+    ctx.fillText('DOWZA WINS!', w / 2, h / 2 - 18);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText('BOWZASHINE DEFEATED', w / 2, h / 2 + 4);
+
+    if (winFrames > 90 && Math.sin(winFrames / 12) > 0) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '10px monospace';
+        ctx.fillText('Press SPACE or tap to play again', w / 2, h / 2 + 28);
+    }
+
+    ctx.textAlign = 'left';
 }
 
-function randomBlockColor() {
-    const colors = ['#ff4444', '#ff8844', '#ffcc44', '#44cc44', '#4488ff', '#aa44ff', '#ff44aa'];
-    return colors[Math.floor(Math.random() * colors.length)];
+// ---- Win-screen restart hook --------------------------------------------
+//
+// The engine's input.js handles restart on the gameOver state. Win is our
+// state, so we add our own listener that fires when the win overlay has been
+// up for >= 60 frames (lockout to avoid accidental skip during the fanfare).
+
+(function installWinRestartHook() {
+    const winFrameThreshold = 60;
+    function shouldRestart() { return Engine.win && Engine.winFrames > winFrameThreshold; }
+    document.addEventListener('keydown', function (e) {
+        if (!shouldRestart()) return;
+        if (['Space', 'Enter', 'KeyJ', 'KeyZ', 'ArrowUp', 'KeyW'].includes(e.code)) {
+            e.preventDefault();
+            restartGame();
+        }
+    });
+    function tapRestart(e) { if (shouldRestart()) restartGame(); }
+    window.addEventListener('click', tapRestart);
+    window.addEventListener('touchstart', tapRestart, { passive: true });
+})();
+
+// ---- Override engine drawUI to suppress the SCORE label ------------------
+//
+// Dowza is a beat-the-boss game, not a score-chase, so we hide the engine's
+// "SCORE: 000000" overlay. JS function-hoisting in the concatenated bundle
+// means this declaration overrides the one in src/engine/screens.js because
+// game.js loads after it. Hearts (HP) are kept verbatim.
+
+function drawUI(ctx) {
+    // Health hearts only -- skip the score line
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#ff4757';
+    ctx.font = '14px monospace';
+    for (let i = 0; i < Engine.state.maxHealth; i++) {
+        const x = GAME.width - 16 - i * 14;
+        const y = 14;
+        if (i < Engine.state.health) {
+            drawHeart(ctx, x, y, 5, '#ff4757');
+        } else {
+            drawHeart(ctx, x, y, 5, '#333');
+        }
+    }
+    ctx.textAlign = 'left';
 }
 
-function randomBlockColorFromSeed(i) {
-    const colors = ['#ff4444', '#ff8844', '#ffcc44', '#44cc44', '#4488ff', '#aa44ff', '#ff44aa'];
-    return colors[i % colors.length];
+// ---- HUD: boss HP bar ---------------------------------------------------
+function drawBossHpBar(ctx, b) {
+    const x = 96, y = 6, w = 192, h = 8;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+    ctx.fillStyle = '#330';
+    ctx.fillRect(x, y, w, h);
+    const pct = b.hp / 3;
+    ctx.fillStyle = '#ffaa20';
+    ctx.fillRect(x, y, Math.max(0, w * pct), h);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 8px monospace';
+    ctx.fillText('BOWZASHINE', x + w / 2, y - 4);
+    ctx.textAlign = 'left';
+}
+
+// ---- Decorative arena gate flames ---------------------------------------
+function drawArenaGate(ctx, screenX, time) {
+    for (let i = 0; i < 7; i++) {
+        const flameY = 80 + i * 14;
+        const flicker = Math.sin(time * 4 + i * 1.3) * 2;
+        ctx.fillStyle = '#ffaa30';
+        ctx.fillRect(screenX - 2, flameY + flicker, 4, 6);
+        ctx.fillStyle = '#ffe060';
+        ctx.fillRect(screenX - 1, flameY + flicker + 1, 2, 3);
+    }
+}
+
+// ---- Title screen backdrop ----------------------------------------------
+function drawTitleBackdrop(ctx, w, h, time) {
+    drawBackgroundSky(ctx, w, h);
+    drawBackgroundFar(ctx, w, h, time * 30);
+    drawBackgroundNear(ctx, w, h, time * 30, time);
+
+    // Ground strip
+    ctx.fillStyle = '#3a1a14';
+    ctx.fillRect(0, h - 28, w, 28);
+    ctx.fillStyle = '#5a2a18';
+    ctx.fillRect(0, h - 28, w, 2);
+
+    // Idle Dowza near center
+    const bob = Math.sin(time * 2) * 0.6;
+    const fake = {
+        x: w / 2 - DOWZA_W / 2,
+        y: h - 28 - DOWZA_H + bob,
+        prevY: h - 28 - DOWZA_H + bob,
+        w: DOWZA_W, h: DOWZA_H,
+        facing: 1,
+        state: 'idle',
+        animFrame: Math.floor(time * 8),
+        iFrames: 0
+    };
+    drawDowza(ctx, fake, 0);
+
+    // Atmospheric tagline below the engine's subtitle
+    ctx.fillStyle = 'rgba(255, 80, 30, 0.85)';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('beat the boss of the fire world', w / 2, h / 2 + 38);
+    ctx.textAlign = 'left';
 }

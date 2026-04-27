@@ -1,32 +1,82 @@
 // ==================== GAME SOUNDS ====================
-// Define sounds as functions that receive the Sound engine (S).
-// Use S.playTone(startFreq, endFreq, duration, waveType, volume)
-// and S.playNoise(duration, startFreq, endFreq)
+// Procedural Web Audio sounds for Dowza. Each sound is a function that
+// receives the Sound engine (S) and uses S.playTone / S.playNoise.
+//
+// Engine-invoked sounds: 'start' (fired on game start) and 'gameOver'.
+// All other sounds are triggered by game logic.
 
 const SOUNDS = {
+    // Title-tap to start: bright triadic rise
     start: (S) => {
-        S.playTone(300, 400, 0.1, 'square', 0.3);
-        setTimeout(() => S.playTone(400, 500, 0.1, 'square', 0.3), 100);
-        setTimeout(() => S.playTone(600, 700, 0.15, 'square', 0.3), 200);
+        S.playTone(330, 440, 0.09, 'square', 0.28);
+        setTimeout(() => S.playTone(440, 660, 0.09, 'square', 0.28), 90);
+        setTimeout(() => S.playTone(660, 880, 0.13, 'square', 0.28), 180);
     },
 
+    // Lose: low descending arpeggio
     gameOver: (S) => {
-        S.playTone(400, 200, 0.3, 'square', 0.3);
-        setTimeout(() => S.playTone(300, 150, 0.3, 'square', 0.3), 150);
-        setTimeout(() => S.playTone(200, 100, 0.4, 'square', 0.3), 300);
+        S.playTone(380, 220, 0.3, 'square', 0.3);
+        setTimeout(() => S.playTone(280, 160, 0.3, 'square', 0.3), 150);
+        setTimeout(() => S.playTone(180, 90,  0.4, 'square', 0.3), 300);
     },
 
-    dodge: (S) => {
-        S.playTone(400, 600, 0.08, 'sine', 0.2);
+    // Mario-style "boing" jump: short rising pitch
+    jump: (S) => {
+        S.playTone(280, 540, 0.07, 'square', 0.16);
     },
 
-    hit: (S) => {
-        S.playTone(200, 80, 0.2, 'sawtooth', 0.4);
+    // Stomp on a regular enemy: low percussive thud + small noise burst
+    stomp: (S) => {
+        S.playTone(220, 110, 0.06, 'square', 0.2);
+        S.playNoise(0.04, 600, 200);
+    },
+
+    // Throwing a fireball: zappy ascending tone
+    fireball: (S) => {
+        S.playTone(420, 820, 0.08, 'square', 0.16);
+    },
+
+    // Walker death: 2-tone descending pop
+    enemyDie: (S) => {
+        S.playTone(700, 420, 0.06, 'square', 0.2);
+        setTimeout(() => S.playTone(420, 240, 0.07, 'square', 0.2), 50);
+    },
+
+    // Dowza takes damage: dissonant low buzz + noise
+    playerHit: (S) => {
+        S.playTone(280, 110, 0.18, 'sawtooth', 0.32);
         S.playNoise(0.1, 400, 100);
     },
 
-    milestone: (S) => {
-        S.playTone(600, 800, 0.1, 'sine', 0.3);
-        setTimeout(() => S.playTone(800, 1000, 0.1, 'sine', 0.3), 80);
+    // Bowzashine fires a shine volley: bright shimmer
+    shine: (S) => {
+        S.playTone(820, 1180, 0.12, 'square', 0.18);
+        setTimeout(() => S.playTone(1100, 880, 0.08, 'sine', 0.14), 60);
+    },
+
+    // Boss shield breaks (fireball lands during SHIELDED): meaty crunch
+    bossStun: (S) => {
+        S.playNoise(0.16, 1200, 200);
+        S.playTone(180, 80, 0.18, 'sawtooth', 0.32);
+    },
+
+    // Stomp while STUNNED damages boss: bigger thud
+    bossHit: (S) => {
+        S.playTone(160, 70, 0.18, 'sawtooth', 0.34);
+        S.playNoise(0.08, 800, 200);
+        setTimeout(() => S.playTone(80, 40, 0.16, 'sawtooth', 0.28), 40);
+    },
+
+    // Boss defeated: dramatic descending wail
+    bossDefeat: (S) => {
+        S.playTone(800, 100, 0.6, 'sawtooth', 0.32);
+        setTimeout(() => S.playNoise(0.4, 600, 100), 100);
+    },
+
+    // Player victory: triumphant rising fanfare
+    win: (S) => {
+        S.playTone(523, 659, 0.12, 'square', 0.3);  // C5 -> E5
+        setTimeout(() => S.playTone(659, 784, 0.12, 'square', 0.3), 110);  // E5 -> G5
+        setTimeout(() => S.playTone(784, 1047, 0.22, 'square', 0.3), 220); // G5 -> C6
     }
 };
