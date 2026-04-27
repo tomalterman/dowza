@@ -40,6 +40,10 @@ function makeDowza(spawnX, spawnY) {
         prevOnGround: true,   // for landing-detection on air->ground transition
         prevVyForLand: 0,     // landing impact velocity (pre-collision-zero)
         footstepFrame: 0,     // rolling counter for footstep cadence
+        // Last-safe-ground checkpoint for pit-fall respawn. Updated every
+        // tick Dowza is grounded with at least one solid tile under his AABB.
+        // Initialized at spawn; refined as he progresses.
+        lastSafeX: spawnX, lastSafeY: spawnY,
         // Win-state freeze: when set, Dowza stops accepting input and idles
         frozen: false
     };
@@ -146,13 +150,40 @@ function dowzaTick(d, level) {
         d.x = level.widthPx - d.w;
         d.vx = 0;
     }
-    // Below-world safety: shouldn't happen in v1 (no pits) but defensive.
-    // Mirror to Engine.state.health and d.alive so the engine's loop.js
-    // gameOver path actually fires -- d.hp alone is invisible to the engine.
-    if (d.y > level.heightPx + 64) {
-        d.hp = 0;
-        d.alive = false;
-        Engine.state.health = 0;
+    // Below-world: Dowza fell into a pit. Respawn at the last safe ground
+    // checkpoint with -1 HP. Friendlier than instant-death for a 6yo --
+    // mistakes cost a heart, not the whole run. If HP drops to 0 from the
+    // fall, the engine's loop.js gameOver path fires normally.
+    if (d.y > level.heightPx + 16) {
+        if (d.iFrames <= 0) {
+            d.hp--;
+            if (d.hp <= 0) {
+                d.alive = false;
+                Engine.state.health = 0;
+            } else {
+                Engine.state.health = d.hp;
+            }
+        }
+        if (d.alive) {
+            d.x = d.lastSafeX;
+            d.y = d.lastSafeY;
+            d.vx = 0; d.vy = 0;
+            d.iFrames = 60;  // brief grace after respawn
+            if (typeof Sound !== 'undefined') Sound.play('fall');
+        }
+    }
+
+    // Update lastSafe checkpoint when Dowza is grounded over solid floor
+    // (not standing on the rightmost edge of a platform with a pit just
+    // ahead -- we only checkpoint when the tile DIRECTLY below center is
+    // solid, so the respawn point is always recoverable).
+    if (d.alive && d.onGround) {
+        const cx = Math.floor((d.x + d.w / 2) / PF_TILE);
+        const cy = Math.floor((d.y + d.h) / PF_TILE);
+        if (PF_isSolid(level, cx, cy)) {
+            d.lastSafeX = d.x;
+            d.lastSafeY = d.y;
+        }
     }
 
     // ---- Fire input (entity creation lives here so we can set facing/origin) ----
@@ -255,6 +286,75 @@ function walkerTick(w, level) {
     // Reverse on patrol bounds (use the same constant for the same reason)
     if (w.x <= w.patrolMin && w.vx < 0) w.vx =  WALKER_SPEED;
     if (w.x >= w.patrolMax && w.vx > 0) w.vx = -WALKER_SPEED;
+}
+
+// =====================================================================
+// SPIKE WALKER (un-stompable; only fireball kills) ------------------
+// =====================================================================
+//
+// Same patrol behavior as Walker but with hard spikes on top: stomping
+// hurts Dowza instead of killing the enemy. Only a fireball takes it
+// down. Slightly slower and 4px taller so the silhouette reads as
+// "different/dangerous" at a glance.
+
+const SPIKE_W = 12;
+const SPIKE_H = 16;          // 4 taller than Walker; spikes account for the difference
+const SPIKE_SPEED = 0.45;    // slower than the regular walker
+
+function makeSpikeWalker(spec) {
+    return {
+        x: spec.x, y: spec.y,
+        prevX: spec.x, prevY: spec.y,
+        vx: -SPIKE_SPEED, vy: 0,
+        w: SPIKE_W, h: SPIKE_H,
+        patrolMin: spec.patrolMin,
+        patrolMax: spec.patrolMax - SPIKE_W,
+        alive: true,
+        deathFrames: 0,
+        animFrame: 0,
+        kind: 'spike'   // marker for render path
+    };
+}
+
+function spikeWalkerTick(s, level) {
+    s.prevX = s.x; s.prevY = s.y;
+    s.animFrame++;
+    if (!s.alive) { s.deathFrames++; return; }
+
+    s.vy += PF_GRAVITY;
+    if (s.vy > PF_MAX_FALL) s.vy = PF_MAX_FALL;
+    const hit = PF_moveAndCollide(s, level);
+
+    if (hit.hitLeft)  s.vx =  SPIKE_SPEED;
+    if (hit.hitRight) s.vx = -SPIKE_SPEED;
+    if (s.x <= s.patrolMin && s.vx < 0) s.vx =  SPIKE_SPEED;
+    if (s.x >= s.patrolMax && s.vx > 0) s.vx = -SPIKE_SPEED;
+}
+
+function resolvePlayerSpikeWalker(d, s) {
+    if (!s.alive) return s.deathFrames < WALKER_DEATH_FRAMES;
+    if (!PF_aabbOverlap(d, s)) return true;
+    // No matter the approach angle: stomping the spikes hurts Dowza.
+    dowzaTakeHit(d, s.x + s.w / 2);
+    return true;
+}
+
+function resolveFireballSpikeWalker(fb, s) {
+    if (!fb.alive || !s.alive) return false;
+    if (!PF_aabbOverlap(fb, s)) return false;
+    fb.alive = false;
+    s.alive = false;
+    s.deathFrames = 1;
+    if (typeof Sound !== 'undefined') Sound.play('enemyDie');
+    for (let i = 0; i < 10; i++) {
+        const ang = (i / 10) * Math.PI * 2;
+        Engine.spawnParticle(
+            s.x + s.w / 2, s.y + s.h / 2,
+            Math.cos(ang) * 2.0, Math.sin(ang) * 2.0 - 0.7,
+            2, '#cc2010', 28
+        );
+    }
+    return true;
 }
 
 // Resolve player-vs-walker contact. Stomp = walker dies + Dowza bounces.

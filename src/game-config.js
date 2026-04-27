@@ -4,7 +4,7 @@
 const GAME = {
     title: 'DOWZA',
     subtitle: 'VS. BOWZASHINE',
-    version: 'v2',
+    version: 'v3',
     bgColor: '#3a0a0a',
 
     // Firebase - see README.md for setup instructions

@@ -1,5 +1,58 @@
 # Changelog
 
+## v3 — Pits, spike walkers, walkers on platforms — actual platforming
+
+**What changed**
+
+- **Pits with respawn-at-last-safe-ground.** The level now has 5 pits in
+  the ground row (cols 18-20, 46-48, 62-64, 96-98, 122-124). Each is 3
+  tiles wide -- comfortably clearable with a full-hold jump. Falling in
+  costs **1 HP and respawns at the last solid-ground checkpoint**, not
+  instant death. Forces vertical movement; you can't run-and-fireball
+  past a pit. New `fall` sound on the descent.
+- **Spike walker enemy** -- taller (16px), slower (0.45 px/tick), with
+  visible black spikes on top. Stomping HURTS Dowza; only a fireball
+  kills it. Placed in 3 spots that pace the introduction (col 38 first,
+  then col 80 in a cluster, then col 102 before the sky-bridge). Forces
+  the player to choose between fireball or jump-over.
+- **Walkers on platforms (5 of them).** Engaging them requires jumping
+  up to platform height -- a fireball fired from the ground is in the
+  wrong lane. Skipping them is now a meaningful choice: faster but
+  leaves enemies alive in the run. (In the v3 playthrough sim, the
+  AI skipped 3 of them deliberately -- proof the choice is real.)
+- **Build-time level-validity check.** Added
+  `_verifyPlatformPitClearance()` that fails loud at module load if a
+  row-11 platform overhangs a pit-launch column. This catches the kind
+  of bug I shipped during this session (a platform's underside blocked
+  Dowza's jump arc over a pit) before it reaches the player.
+- **Visible lava in pits.** Pits render with the lava-tile graphic at
+  the bottom of the screen plus a soft orange glow above the pit edge,
+  so the danger reads from a distance.
+- **Pit lookahead in the test driver** is wider (2 tiles) because
+  reactive timing on a 1-tile lookahead is too tight even for an AI.
+  Real players have eyes; this is for the headless verification only.
+
+**Why**
+
+After v2, "you can just run and fire to kill all the walkers" -- the
+single fireball-height lane was the issue. Researching named Mario
+patterns (CCST framework, [SMB pattern table](https://www.researchgate.net/figure/Examples-of-patterns-for-Super-Mario-Bros_tbl1_245024235),
+Khalifa et al. *Level Design Patterns in 2D Games*) surfaced the
+specific tools that break the strategy: **pits** (forces vertical
+movement), **un-stompable enemies** (forces fireball or dodge),
+**enemies on platforms** (forces lane-change for engagement).
+
+v3 applies all three. The headless playthrough now ends at HP 1/6
+instead of HP 5/6 -- meaningful tension instead of a victory lap.
+Spike walkers force tactical thinking. Pits force jumping. Platform
+walkers create the run-fast-or-engage-everything dilemma.
+
+Real bug caught in v3 development: the original platform layout had
+a row-11 platform directly above where Dowza needed to launch over the
+first pit. The platform's underside blocked the jump (ny snapped to
+ceiling, vy zeroed mid-leap), Dowza walked off the ledge instead. The
+build-time clearance check now prevents this from shipping.
+
 ## v2 — Bigger level, audio-rich, iPad-fixed
 
 **What changed**

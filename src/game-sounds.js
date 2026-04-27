@@ -106,5 +106,12 @@ const SOUNDS = {
     // fireball missed.
     fireballWall: (S) => {
         S.playNoise(0.04, 1200, 600);
+    },
+
+    // Falling into a pit + respawning at last-safe-ground. Two-stage:
+    // descending whoosh, then a small bonk on respawn.
+    fall: (S) => {
+        S.playTone(600, 100, 0.35, 'sawtooth', 0.25);
+        setTimeout(() => S.playNoise(0.08, 600, 200), 350);
     }
 };

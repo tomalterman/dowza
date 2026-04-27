@@ -19,6 +19,7 @@ function gameInit() {
     // Core state
     Engine.player = makeDowza(LEVEL.playerSpawn.x, LEVEL.playerSpawn.y);
     Engine.walkers = LEVEL.walkerSpawns.map(makeWalker);
+    Engine.spikeWalkers = (LEVEL.spikeWalkerSpawns || []).map(makeSpikeWalker);
     Engine.fireballs = [];
     Engine.shineBlasts = [];
     Engine.bowzashine = null;     // spawned when Dowza enters arena
@@ -56,12 +57,24 @@ function physicsTick(dt) {
         if (!keep) { Engine.walkers.splice(i, 1); i--; }
     }
 
+    for (let i = 0; i < Engine.spikeWalkers.length; i++) {
+        const s = Engine.spikeWalkers[i];
+        spikeWalkerTick(s, LEVEL);
+        const keep = resolvePlayerSpikeWalker(d, s);
+        if (!keep) { Engine.spikeWalkers.splice(i, 1); i--; }
+    }
+
     for (let i = 0; i < Engine.fireballs.length; i++) {
         const fb = Engine.fireballs[i];
         fireballTick(fb, LEVEL);
         if (fb.alive) {
             for (const w of Engine.walkers) {
                 if (resolveFireballWalker(fb, w)) break;
+            }
+        }
+        if (fb.alive) {
+            for (const s of Engine.spikeWalkers) {
+                if (resolveFireballSpikeWalker(fb, s)) break;
             }
         }
         if (fb.alive && Engine.bowzashine) {
@@ -122,6 +135,7 @@ function gameRender(ctx, w, h) {
     }
 
     for (const wk of Engine.walkers) drawWalker(ctx, wk, camX);
+    for (const sw of Engine.spikeWalkers) drawSpikeWalker(ctx, sw, camX);
     for (const fb of Engine.fireballs) drawFireball(ctx, fb, camX);
     if (Engine.bowzashine) drawBowzashine(ctx, Engine.bowzashine, camX, time);
     for (const s of Engine.shineBlasts) drawShineBlast(ctx, s, camX);
@@ -147,6 +161,7 @@ function gameOverRender(ctx, w, h) {
         drawBackgroundFar(ctx, w, h, camX);
         drawLevelTiles(ctx, LEVEL, camX, w, h);
         for (const wk of Engine.walkers) drawWalker(ctx, wk, camX);
+        for (const sw of Engine.spikeWalkers) drawSpikeWalker(ctx, sw, camX);
         if (Engine.bowzashine) drawBowzashine(ctx, Engine.bowzashine, camX, gameFrame / 60);
         drawDowza(ctx, Engine.player, camX);
     }

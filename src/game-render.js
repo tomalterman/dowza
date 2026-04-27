@@ -207,6 +207,78 @@ function drawWalker(ctx, w, camX) {
 }
 
 // =====================================================================
+// SPIKE WALKER (12x16) -- un-stompable; visibly bristled
+// =====================================================================
+
+function drawSpikeWalker(ctx, s, camX) {
+    const sx = Math.round(s.x - camX);
+    const sy = Math.round(s.y);
+
+    if (!s.alive) {
+        const t = Math.min(1, s.deathFrames / WALKER_DEATH_FRAMES);
+        const sh = Math.max(2, Math.round(SPIKE_H * (1 - t * 0.85)));
+        const yOff = SPIKE_H - sh;
+        ctx.fillStyle = `rgba(180, 30, 20, ${(1 - t).toFixed(2)})`;
+        rectPx(ctx, sx + 1, sy + yOff, SPIKE_W - 2, sh);
+        return;
+    }
+
+    // Main body -- darker, redder than walker so they read distinct
+    ctx.fillStyle = '#8a1810';
+    rectPx(ctx, sx + 1, sy + 5, SPIKE_W - 2, SPIKE_H - 6);
+    ctx.fillStyle = '#5a0a06';
+    rectPx(ctx, sx + 1, sy + 5, SPIKE_W - 2, 1);
+    rectPx(ctx, sx + 1, sy + SPIKE_H - 2, SPIKE_W - 2, 1);
+    ctx.fillStyle = '#cc2818';
+    rectPx(ctx, sx + 2, sy + 6, 1, SPIKE_H - 8);
+
+    // Hot belly
+    ctx.fillStyle = '#ff7028';
+    rectPx(ctx, sx + 4, sy + 9, 4, 4);
+    ctx.fillStyle = '#ffaa30';
+    rectPx(ctx, sx + 5, sy + 10, 2, 2);
+
+    // Eyes
+    ctx.fillStyle = '#000';
+    if (s.vx >= 0) {
+        rectPx(ctx, sx + 7, sy + 7, 1, 2);
+        rectPx(ctx, sx + 9, sy + 7, 1, 2);
+    } else {
+        rectPx(ctx, sx + 2, sy + 7, 1, 2);
+        rectPx(ctx, sx + 4, sy + 7, 1, 2);
+    }
+
+    // Spikes -- 4 tall black triangles across the head, this is what makes
+    // it visually obvious you can't stomp this thing.
+    ctx.fillStyle = '#000';
+    rectPx(ctx, sx + 1, sy + 3, 1, 2);
+    rectPx(ctx, sx + 1, sy + 1, 1, 2);
+    rectPx(ctx, sx + 4, sy + 2, 1, 3);
+    rectPx(ctx, sx + 4, sy,     1, 2);
+    rectPx(ctx, sx + 7, sy + 2, 1, 3);
+    rectPx(ctx, sx + 7, sy,     1, 2);
+    rectPx(ctx, sx + 10, sy + 3, 1, 2);
+    rectPx(ctx, sx + 10, sy + 1, 1, 2);
+    // Spike tips (lighter)
+    ctx.fillStyle = '#400';
+    rectPx(ctx, sx + 1, sy + 1, 1, 1);
+    rectPx(ctx, sx + 4, sy,     1, 1);
+    rectPx(ctx, sx + 7, sy,     1, 1);
+    rectPx(ctx, sx + 10, sy + 1, 1, 1);
+
+    // Feet
+    const stance = Math.floor(s.animFrame / 10) % 2;
+    ctx.fillStyle = '#200';
+    if (stance === 0) {
+        rectPx(ctx, sx + 2, sy + SPIKE_H - 1, 3, 1);
+        rectPx(ctx, sx + 7, sy + SPIKE_H - 1, 3, 1);
+    } else {
+        rectPx(ctx, sx + 3, sy + SPIKE_H - 1, 3, 1);
+        rectPx(ctx, sx + 6, sy + SPIKE_H - 1, 3, 1);
+    }
+}
+
+// =====================================================================
 // FIREBALL (6x6) -- flickers yellow/orange/red over 4 frames
 // =====================================================================
 
