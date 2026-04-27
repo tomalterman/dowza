@@ -1223,9 +1223,12 @@ const SOUNDS = {
 // ---- Tunable constants ---------------------------------------------------
 const PF_FIXED_DT       = 1 / 60;   // physics tick length (seconds)
 const PF_TILE           = 16;       // tile pixel size (16x16)
-const PF_GRAVITY        = 0.34;     // px / tick^2
+const PF_GRAVITY        = 0.30;     // px / tick^2
 const PF_MAX_FALL       = 5.5;      // terminal vertical velocity
-const PF_JUMP_VEL       = -5.4;     // initial jump impulse (negative = up)
+const PF_JUMP_VEL       = -6.0;     // initial jump impulse (negative = up); tuned so a
+                                    //   full-hold jump clears the 40px Bowzashine top
+                                    //   with margin (max rise ~60px from ground at y=192,
+                                    //   so peak Dowza bottom ~148, well above boss top 176)
 const PF_JUMP_CUTOFF    = 0.45;     // release-jump cuts upward velocity to this fraction
 const PF_COYOTE_FRAMES  = 7;        // frames after walking off a ledge that jump still works
 const PF_JUMP_BUFFER    = 7;        // frames a queued jump remains valid before landing
@@ -1284,6 +1287,14 @@ function PF_moveAndCollide(e, level) {
     e.onGround = false;
     let hitLeft = false, hitRight = false, hitCeil = false;
 
+    // Why no -0.001 epsilon on the snap-out positions: subtracting 0.001 from
+    // a snap-out ("park at wall edge minus a hair") leaves the entity AABB
+    // peeking 0.001 px into the previous tile. floor(y / TILE) on the next
+    // axis sweep then returns a tile row the entity is barely intersecting,
+    // and a platform sitting in that peek-row ghost-blocks horizontal motion.
+    // We park flush at the boundary instead. The -0.001 on the AABB sweep
+    // *range* below is preserved -- the AABB upper edge is exclusive there.
+
     // ---- X axis ----
     let nx = e.x + e.vx;
     if (e.vx > 0) {
@@ -1294,7 +1305,7 @@ function PF_moveAndCollide(e, level) {
         const tyBot = Math.floor((e.y + e.h - 0.001) / PF_TILE);
         for (let ty = tyTop; ty <= tyBot; ty++) {
             if (PF_isSolid(level, tx, ty)) {
-                nx = tx * PF_TILE - e.w - 0.001;
+                nx = tx * PF_TILE - e.w;
                 e.vx = 0;
                 hitRight = true;
                 break;
@@ -1307,7 +1318,7 @@ function PF_moveAndCollide(e, level) {
         const tyBot = Math.floor((e.y + e.h - 0.001) / PF_TILE);
         for (let ty = tyTop; ty <= tyBot; ty++) {
             if (PF_isSolid(level, tx, ty)) {
-                nx = (tx + 1) * PF_TILE + 0.001;
+                nx = (tx + 1) * PF_TILE;
                 e.vx = 0;
                 hitLeft = true;
                 break;
@@ -1326,7 +1337,7 @@ function PF_moveAndCollide(e, level) {
         const txRight = Math.floor((e.x + e.w - 0.001) / PF_TILE);
         for (let tx = txLeft; tx <= txRight; tx++) {
             if (PF_isSolid(level, tx, ty)) {
-                ny = ty * PF_TILE - e.h - 0.001;
+                ny = ty * PF_TILE - e.h;
                 e.vy = 0;
                 e.onGround = true;
                 break;
@@ -1340,7 +1351,7 @@ function PF_moveAndCollide(e, level) {
         const txRight = Math.floor((e.x + e.w - 0.001) / PF_TILE);
         for (let tx = txLeft; tx <= txRight; tx++) {
             if (PF_isSolid(level, tx, ty)) {
-                ny = (ty + 1) * PF_TILE + 0.001;
+                ny = (ty + 1) * PF_TILE;
                 e.vy = 0;
                 hitCeil = true;
                 break;
@@ -2029,7 +2040,9 @@ function bowzashineTick(b, dowza, level) {
     }
 
     if (b.state === 'STUNNED') {
-        b.y = groundY + Math.sin(b.animFrame * 0.3) * 3;
+        // Wobble lurches sideways more than vertically -- a tiny y-bob keeps
+        // the stomp target stable so a kid can land it consistently.
+        b.y = groundY + Math.sin(b.animFrame * 0.3) * 0.5;
         if (b.stateFrames >= 75) {
             b.state = 'SHIELDED';
             b.stateFrames = 0;
@@ -2087,9 +2100,15 @@ function resolvePlayerBoss(d, b) {
     if (!PF_aabbOverlap(d, b)) return;
 
     if (b.state === 'STUNNED') {
-        // Stomp criterion: was previous-frame bottom above boss top?
+        // Stomp criterion: was previous-frame bottom above boss top? +8 gives
+        // a more forgiving landing window than the +2 used for walkers
+        // (the boss is taller and slightly mobile, so kids need extra grace).
+        // Side-touch during STUNNED is harmless: a paralyzed boss can't hurt
+        // Dowza, so jumping into him from the side is fine. This also avoids
+        // the "jumped onto boss but clipped his side first and got damaged
+        // before the stomp registered" failure mode.
         const prevBottom = d.prevY + d.h;
-        if (d.vy > 0 && prevBottom <= b.y + 4) {
+        if (d.vy > 0 && prevBottom <= b.y + 8) {
             // DAMAGE
             b.hp--;
             b.state = 'DAMAGED';
@@ -2111,8 +2130,10 @@ function resolvePlayerBoss(d, b) {
         }
     }
 
-    if (b.state === 'SHIELDED' || b.state === 'STUNNED' || b.state === 'DAMAGED') {
-        // Side-touch always hurts (even DAMAGED state -- don't stomp the corpse)
+    // Side-touch hurts only when the boss is shielded. Stunned + damaged states
+    // are vulnerable; harming the kid for jumping into a defenseless boss feels
+    // wrong (and would prevent the stomp from ever landing).
+    if (b.state === 'SHIELDED') {
         dowzaTakeHit(d, b.x + b.w / 2);
     }
 }

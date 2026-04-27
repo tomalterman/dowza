@@ -396,7 +396,9 @@ function bowzashineTick(b, dowza, level) {
     }
 
     if (b.state === 'STUNNED') {
-        b.y = groundY + Math.sin(b.animFrame * 0.3) * 3;
+        // Wobble lurches sideways more than vertically -- a tiny y-bob keeps
+        // the stomp target stable so a kid can land it consistently.
+        b.y = groundY + Math.sin(b.animFrame * 0.3) * 0.5;
         if (b.stateFrames >= 75) {
             b.state = 'SHIELDED';
             b.stateFrames = 0;
@@ -454,9 +456,15 @@ function resolvePlayerBoss(d, b) {
     if (!PF_aabbOverlap(d, b)) return;
 
     if (b.state === 'STUNNED') {
-        // Stomp criterion: was previous-frame bottom above boss top?
+        // Stomp criterion: was previous-frame bottom above boss top? +8 gives
+        // a more forgiving landing window than the +2 used for walkers
+        // (the boss is taller and slightly mobile, so kids need extra grace).
+        // Side-touch during STUNNED is harmless: a paralyzed boss can't hurt
+        // Dowza, so jumping into him from the side is fine. This also avoids
+        // the "jumped onto boss but clipped his side first and got damaged
+        // before the stomp registered" failure mode.
         const prevBottom = d.prevY + d.h;
-        if (d.vy > 0 && prevBottom <= b.y + 4) {
+        if (d.vy > 0 && prevBottom <= b.y + 8) {
             // DAMAGE
             b.hp--;
             b.state = 'DAMAGED';
@@ -478,8 +486,10 @@ function resolvePlayerBoss(d, b) {
         }
     }
 
-    if (b.state === 'SHIELDED' || b.state === 'STUNNED' || b.state === 'DAMAGED') {
-        // Side-touch always hurts (even DAMAGED state -- don't stomp the corpse)
+    // Side-touch hurts only when the boss is shielded. Stunned + damaged states
+    // are vulnerable; harming the kid for jumping into a defenseless boss feels
+    // wrong (and would prevent the stomp from ever landing).
+    if (b.state === 'SHIELDED') {
         dowzaTakeHit(d, b.x + b.w / 2);
     }
 }

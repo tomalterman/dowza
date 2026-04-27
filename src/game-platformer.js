@@ -8,9 +8,12 @@
 // ---- Tunable constants ---------------------------------------------------
 const PF_FIXED_DT       = 1 / 60;   // physics tick length (seconds)
 const PF_TILE           = 16;       // tile pixel size (16x16)
-const PF_GRAVITY        = 0.34;     // px / tick^2
+const PF_GRAVITY        = 0.30;     // px / tick^2
 const PF_MAX_FALL       = 5.5;      // terminal vertical velocity
-const PF_JUMP_VEL       = -5.4;     // initial jump impulse (negative = up)
+const PF_JUMP_VEL       = -6.0;     // initial jump impulse (negative = up); tuned so a
+                                    //   full-hold jump clears the 40px Bowzashine top
+                                    //   with margin (max rise ~60px from ground at y=192,
+                                    //   so peak Dowza bottom ~148, well above boss top 176)
 const PF_JUMP_CUTOFF    = 0.45;     // release-jump cuts upward velocity to this fraction
 const PF_COYOTE_FRAMES  = 7;        // frames after walking off a ledge that jump still works
 const PF_JUMP_BUFFER    = 7;        // frames a queued jump remains valid before landing
@@ -69,6 +72,14 @@ function PF_moveAndCollide(e, level) {
     e.onGround = false;
     let hitLeft = false, hitRight = false, hitCeil = false;
 
+    // Why no -0.001 epsilon on the snap-out positions: subtracting 0.001 from
+    // a snap-out ("park at wall edge minus a hair") leaves the entity AABB
+    // peeking 0.001 px into the previous tile. floor(y / TILE) on the next
+    // axis sweep then returns a tile row the entity is barely intersecting,
+    // and a platform sitting in that peek-row ghost-blocks horizontal motion.
+    // We park flush at the boundary instead. The -0.001 on the AABB sweep
+    // *range* below is preserved -- the AABB upper edge is exclusive there.
+
     // ---- X axis ----
     let nx = e.x + e.vx;
     if (e.vx > 0) {
@@ -79,7 +90,7 @@ function PF_moveAndCollide(e, level) {
         const tyBot = Math.floor((e.y + e.h - 0.001) / PF_TILE);
         for (let ty = tyTop; ty <= tyBot; ty++) {
             if (PF_isSolid(level, tx, ty)) {
-                nx = tx * PF_TILE - e.w - 0.001;
+                nx = tx * PF_TILE - e.w;
                 e.vx = 0;
                 hitRight = true;
                 break;
@@ -92,7 +103,7 @@ function PF_moveAndCollide(e, level) {
         const tyBot = Math.floor((e.y + e.h - 0.001) / PF_TILE);
         for (let ty = tyTop; ty <= tyBot; ty++) {
             if (PF_isSolid(level, tx, ty)) {
-                nx = (tx + 1) * PF_TILE + 0.001;
+                nx = (tx + 1) * PF_TILE;
                 e.vx = 0;
                 hitLeft = true;
                 break;
@@ -111,7 +122,7 @@ function PF_moveAndCollide(e, level) {
         const txRight = Math.floor((e.x + e.w - 0.001) / PF_TILE);
         for (let tx = txLeft; tx <= txRight; tx++) {
             if (PF_isSolid(level, tx, ty)) {
-                ny = ty * PF_TILE - e.h - 0.001;
+                ny = ty * PF_TILE - e.h;
                 e.vy = 0;
                 e.onGround = true;
                 break;
@@ -125,7 +136,7 @@ function PF_moveAndCollide(e, level) {
         const txRight = Math.floor((e.x + e.w - 0.001) / PF_TILE);
         for (let tx = txLeft; tx <= txRight; tx++) {
             if (PF_isSolid(level, tx, ty)) {
-                ny = (ty + 1) * PF_TILE + 0.001;
+                ny = (ty + 1) * PF_TILE;
                 e.vy = 0;
                 hitCeil = true;
                 break;
