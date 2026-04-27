@@ -1,0 +1,9 @@
+{
+  "name": "dowza",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dowza - an arcade game built from the arcade template",
+  "scripts": {
+    "build": "node build.js"
+  }
+}
