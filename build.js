@@ -18,6 +18,13 @@ const jsFiles = [
     'src/engine/loop.js',
     'src/engine/engine.js',
     'src/game-sounds.js',
+    // Dowza-specific platformer modules. Order matters: each file may rely on
+    // globals declared by files above it. game.js is the orchestrator and must
+    // come last so it can reference everything else.
+    'src/game-platformer.js',
+    'src/game-level.js',
+    'src/game-entities.js',
+    'src/game-render.js',
     'src/game.js'
 ];
 
