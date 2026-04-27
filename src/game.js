@@ -77,6 +77,15 @@ function physicsTick(dt) {
         Engine.bowzashine = makeBowzashine(LEVEL.arena.bossSpawn.x, LEVEL.arena.bossSpawn.y);
     }
 
+    // Once the arena is locked, prevent Dowza from walking back left of the
+    // gate (camera locks at minTileX*16, so a kid wandering further left
+    // ends up off-screen). The level has no left wall there, so we enforce
+    // a soft barrier here.
+    if (Engine.arenaTriggered && d.x < LEVEL.arena.triggerX) {
+        d.x = LEVEL.arena.triggerX;
+        if (d.vx < 0) d.vx = 0;
+    }
+
     if (Engine.bowzashine) {
         bowzashineTick(Engine.bowzashine, d, LEVEL);
         resolvePlayerBoss(d, Engine.bowzashine);
@@ -169,25 +178,68 @@ function drawWinScreen(ctx, w, h, winFrames) {
     ctx.textAlign = 'left';
 }
 
+// ---- Window-blur input clear --------------------------------------------
+//
+// Browsers don't deliver keyup to a defocused window, so a kid alt-tabbing
+// while holding right or jump comes back to a Dowza that's been
+// auto-running. Clear all input flags on blur and visibility-change so the
+// game pauses cleanly. (The animation frame keeps ticking but with no input
+// Dowza decelerates and idles.)
+
+window.addEventListener('blur', function () {
+    if (Engine && Engine.input) {
+        for (const k in Engine.input) Engine.input[k] = false;
+    }
+});
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden && Engine && Engine.input) {
+        for (const k in Engine.input) Engine.input[k] = false;
+    }
+});
+
 // ---- Win-screen restart hook --------------------------------------------
 //
 // The engine's input.js handles restart on the gameOver state. Win is our
 // state, so we add our own listener that fires when the win overlay has been
 // up for >= 60 frames (lockout to avoid accidental skip during the fanfare).
+//
+// Belt-and-suspenders against three real races:
+//   1. shouldRestart() asserts !gameOver && !showTitleScreen so a stale
+//      Engine.win flag can never trigger a phantom restart.
+//   2. keydown stopImmediatePropagation prevents the same Space/W/Up
+//      keypress from also reaching the engine's input handler and setting
+//      Engine.input.jump for the first frame of the new run.
+//   3. Click/touch listener is scoped to gameContainer (and skips taps on
+//      touchControls / muteBtn) so touch-button presses during win don't
+//      bubble to a window-level restart.
 
 (function installWinRestartHook() {
     const winFrameThreshold = 60;
-    function shouldRestart() { return Engine.win && Engine.winFrames > winFrameThreshold; }
+    function shouldRestart() {
+        return Engine.win
+            && Engine.winFrames > winFrameThreshold
+            && !Engine.state.gameOver
+            && !Engine.state.showTitleScreen;
+    }
     document.addEventListener('keydown', function (e) {
         if (!shouldRestart()) return;
         if (['Space', 'Enter', 'KeyJ', 'KeyZ', 'ArrowUp', 'KeyW'].includes(e.code)) {
             e.preventDefault();
+            e.stopImmediatePropagation();
             restartGame();
         }
-    });
-    function tapRestart(e) { if (shouldRestart()) restartGame(); }
-    window.addEventListener('click', tapRestart);
-    window.addEventListener('touchstart', tapRestart, { passive: true });
+    }, true);  // capture phase so we beat the engine's listener
+    function tapRestart(e) {
+        if (!shouldRestart()) return;
+        // Skip taps on the touch buttons / mute button -- those have their
+        // own handlers and shouldn't double-fire as restart.
+        const t = e.target;
+        if (t && t.closest && (t.closest('#touchControls') || t.closest('#muteBtn'))) return;
+        restartGame();
+    }
+    const container = document.getElementById('gameContainer') || document;
+    container.addEventListener('click', tapRestart);
+    container.addEventListener('touchstart', tapRestart, { passive: true });
 })();
 
 // ---- Override engine drawUI to suppress the SCORE label ------------------

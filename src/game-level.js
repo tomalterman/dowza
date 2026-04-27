@@ -39,25 +39,6 @@ LEVEL_ROWS.forEach((r, i) => {
     if (r.length !== 80) console.error(`LEVEL row ${i} has length ${r.length}, expected 80`);
 });
 
-// Patch in lava decoration along the inside-arena floor and a few molten
-// pools throughout the level. Lava is decorative in v1 but adds atmosphere.
-// Apply after the literal so the literal stays human-readable.
-function _patchLevelLava() {
-    // Lava strips on the bottom row inside the arena and at a few spots
-    // earlier (won't damage in v1 but we leave it in case v2 turns them on).
-    const decoratePoolsAtCols = [22, 38, 50, 60, 64, 72, 78];
-    decoratePoolsAtCols.forEach(c => {
-        // Skip if a solid wall would overlap this column on the ground row
-        const row = LEVEL_ROWS[13];
-        if (row[c] === '#') {
-            // bake decorative lava one row above (visual only; tile remains solid)
-            const above = LEVEL_ROWS[12].split('');
-            // leave the tile sequence untouched -- decorative drawing handled in render
-        }
-    });
-}
-_patchLevelLava();
-
 // Convert character grid into integer tile grid the platformer expects.
 function _buildLevelTiles() {
     const map = { '.': 0 /*PF_TILE_EMPTY*/, '#': 1 /*PF_TILE_SOLID*/, '~': 2 /*PF_TILE_LAVA*/ };

@@ -28,6 +28,7 @@ function makeDowza(spawnX, spawnY) {
         jumpHeld: false,      // tracks whether jump is currently held
         prevJumpInput: false, // for rising-edge detection
         prevFireInput: false,
+        jumpCutApplied: false, // variable-jump cutoff is one-shot per jump
         fireCooldown: 0,
         hp: 6,
         maxHp: 6,
@@ -92,15 +93,19 @@ function dowzaTick(d, level) {
         d.coyote = 0;
         d.buffer = 0;
         d.onGround = false;
+        d.jumpCutApplied = false;
         if (typeof Sound !== 'undefined') Sound.play('jump');
     }
 
-    // ---- Variable jump height: release-jump caps upward velocity ----
-    if (!jumpHeld && d.vy < 0) {
+    // ---- Variable jump height: release-jump caps upward velocity ONCE per
+    // jump on the held->released transition. Without the one-shot guard, the
+    // cutoff multiplies on every released-frame and a 1-tick tap collapses
+    // to almost the same height as a 3-tick tap (vy: -6 -> -2.7 -> -1.2 -> ~0).
+    if (!jumpHeld && d.vy < 0 && !d.jumpCutApplied) {
         d.vy *= PF_JUMP_CUTOFF;
-        // After applying once, ensure we don't keep cutting on subsequent ticks
-        if (Math.abs(d.vy) < 0.5) d.vy = 0;
+        d.jumpCutApplied = true;
     }
+    if (d.onGround) d.jumpCutApplied = false;
 
     // ---- Apply gravity ----
     d.vy += PF_GRAVITY;
@@ -115,9 +120,13 @@ function dowzaTick(d, level) {
         d.x = level.widthPx - d.w;
         d.vx = 0;
     }
-    // Below-world safety: shouldn't happen (no pits) but defensive
+    // Below-world safety: shouldn't happen in v1 (no pits) but defensive.
+    // Mirror to Engine.state.health and d.alive so the engine's loop.js
+    // gameOver path actually fires -- d.hp alone is invisible to the engine.
     if (d.y > level.heightPx + 64) {
         d.hp = 0;
+        d.alive = false;
+        Engine.state.health = 0;
     }
 
     // ---- Fire input (entity creation lives here so we can set facing/origin) ----
@@ -129,7 +138,7 @@ function dowzaTick(d, level) {
 
     // ---- State machine ----
     let next = d.state;
-    if (d.iFrames > 50 && d.state !== 'hurt') {  // first ~10 frames after damage flash as hurt
+    if (d.iFrames > 50) {                  // first ~10 frames after damage flash as hurt
         next = 'hurt';
     } else if (!d.onGround && d.vy < 0) {
         next = 'jump';
@@ -180,12 +189,14 @@ function dowzaStompBounce(d) {
 
 const WALKER_W = 12;
 const WALKER_H = 12;
+const WALKER_SPEED = 0.65;          // px/tick magnitude
+const WALKER_DEATH_FRAMES = 18;     // squash-fade duration before splice
 
 function makeWalker(spec) {
     return {
         x: spec.x, y: spec.y,
         prevX: spec.x, prevY: spec.y,
-        vx: -0.65, vy: 0,                 // start moving left
+        vx: -WALKER_SPEED, vy: 0,         // start moving left
         w: WALKER_W, h: WALKER_H,
         patrolMin: spec.patrolMin,
         patrolMax: spec.patrolMax - WALKER_W,  // upper bound is left-edge constraint
@@ -209,20 +220,22 @@ function walkerTick(w, level) {
     if (w.vy > PF_MAX_FALL) w.vy = PF_MAX_FALL;
     const hit = PF_moveAndCollide(w, level);
 
-    // Reverse on wall contact
-    if (hit.hitLeft) w.vx = Math.abs(w.vx);
-    if (hit.hitRight) w.vx = -Math.abs(w.vx);
+    // Reverse on wall contact. Use the constant speed magnitude rather than
+    // Math.abs(vx) -- PF_moveAndCollide zeroes vx on the colliding tick, so
+    // Math.abs(0) would freeze the walker forever.
+    if (hit.hitLeft)  w.vx =  WALKER_SPEED;
+    if (hit.hitRight) w.vx = -WALKER_SPEED;
 
-    // Reverse on patrol bounds
-    if (w.x <= w.patrolMin && w.vx < 0) w.vx = Math.abs(w.vx);
-    if (w.x >= w.patrolMax && w.vx > 0) w.vx = -Math.abs(w.vx);
+    // Reverse on patrol bounds (use the same constant for the same reason)
+    if (w.x <= w.patrolMin && w.vx < 0) w.vx =  WALKER_SPEED;
+    if (w.x >= w.patrolMax && w.vx > 0) w.vx = -WALKER_SPEED;
 }
 
 // Resolve player-vs-walker contact. Stomp = walker dies + Dowza bounces.
 // Side touch = Dowza takes a hit. Returns true if the walker should be kept
 // active (alive or in death animation).
 function resolvePlayerWalker(d, w) {
-    if (!w.alive) return w.deathFrames < 18;
+    if (!w.alive) return w.deathFrames < WALKER_DEATH_FRAMES;
     if (!PF_aabbOverlap(d, w)) return true;
 
     // Stomp criterion: previous-frame Dowza-bottom was above walker-top AND
@@ -413,6 +426,12 @@ function bowzashineTick(b, dowza, level) {
             if (b.hp <= 0) {
                 b.state = 'DEFEATED';
                 b.stateFrames = 0;
+                // Clear in-flight shines so a stray late blast can't kill
+                // Dowza during the win fanfare and produce a confusing
+                // simultaneous win+gameOver state. Also grant Dowza victory
+                // invulnerability through the rest of the DEFEATED sequence.
+                Engine.shineBlasts = [];
+                if (Engine.player) Engine.player.iFrames = Math.max(Engine.player.iFrames, 200);
                 if (typeof Sound !== 'undefined') Sound.play('bossDefeat');
             } else {
                 b.state = 'SHIELDED';

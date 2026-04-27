@@ -11,10 +11,10 @@
 // =====================================================================
 
 function drawDowza(ctx, d, camX) {
-    if (!d || !d.alive && d.alive !== undefined) {
-        // alive flag: undefined means title-screen fake; false means dead.
-        if (d.alive === false) return;
-    }
+    // alive: undefined means a title-screen / overlay fake (always drawn);
+    // alive === false means an in-game dead Dowza (don't draw).
+    if (!d) return;
+    if (d.alive === false) return;
     const sx = Math.round(d.x - camX);
     const sy = Math.round(d.y);
 
@@ -154,7 +154,7 @@ function drawWalker(ctx, w, camX) {
 
     if (!w.alive) {
         // Squash fade: shrink vertically and fade out across deathFrames
-        const t = Math.min(1, w.deathFrames / 18);
+        const t = Math.min(1, w.deathFrames / WALKER_DEATH_FRAMES);
         const sh = Math.max(2, Math.round(WALKER_H * (1 - t * 0.85)));
         const yOff = WALKER_H - sh;
         ctx.fillStyle = `rgba(220, 80, 30, ${(1 - t).toFixed(2)})`;

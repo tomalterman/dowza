@@ -1445,25 +1445,6 @@ LEVEL_ROWS.forEach((r, i) => {
     if (r.length !== 80) console.error(`LEVEL row ${i} has length ${r.length}, expected 80`);
 });
 
-// Patch in lava decoration along the inside-arena floor and a few molten
-// pools throughout the level. Lava is decorative in v1 but adds atmosphere.
-// Apply after the literal so the literal stays human-readable.
-function _patchLevelLava() {
-    // Lava strips on the bottom row inside the arena and at a few spots
-    // earlier (won't damage in v1 but we leave it in case v2 turns them on).
-    const decoratePoolsAtCols = [22, 38, 50, 60, 64, 72, 78];
-    decoratePoolsAtCols.forEach(c => {
-        // Skip if a solid wall would overlap this column on the ground row
-        const row = LEVEL_ROWS[13];
-        if (row[c] === '#') {
-            // bake decorative lava one row above (visual only; tile remains solid)
-            const above = LEVEL_ROWS[12].split('');
-            // leave the tile sequence untouched -- decorative drawing handled in render
-        }
-    });
-}
-_patchLevelLava();
-
 // Convert character grid into integer tile grid the platformer expects.
 function _buildLevelTiles() {
     const map = { '.': 0 /*PF_TILE_EMPTY*/, '#': 1 /*PF_TILE_SOLID*/, '~': 2 /*PF_TILE_LAVA*/ };
@@ -1672,6 +1653,7 @@ function makeDowza(spawnX, spawnY) {
         jumpHeld: false,      // tracks whether jump is currently held
         prevJumpInput: false, // for rising-edge detection
         prevFireInput: false,
+        jumpCutApplied: false, // variable-jump cutoff is one-shot per jump
         fireCooldown: 0,
         hp: 6,
         maxHp: 6,
@@ -1736,15 +1718,19 @@ function dowzaTick(d, level) {
         d.coyote = 0;
         d.buffer = 0;
         d.onGround = false;
+        d.jumpCutApplied = false;
         if (typeof Sound !== 'undefined') Sound.play('jump');
     }
 
-    // ---- Variable jump height: release-jump caps upward velocity ----
-    if (!jumpHeld && d.vy < 0) {
+    // ---- Variable jump height: release-jump caps upward velocity ONCE per
+    // jump on the held->released transition. Without the one-shot guard, the
+    // cutoff multiplies on every released-frame and a 1-tick tap collapses
+    // to almost the same height as a 3-tick tap (vy: -6 -> -2.7 -> -1.2 -> ~0).
+    if (!jumpHeld && d.vy < 0 && !d.jumpCutApplied) {
         d.vy *= PF_JUMP_CUTOFF;
-        // After applying once, ensure we don't keep cutting on subsequent ticks
-        if (Math.abs(d.vy) < 0.5) d.vy = 0;
+        d.jumpCutApplied = true;
     }
+    if (d.onGround) d.jumpCutApplied = false;
 
     // ---- Apply gravity ----
     d.vy += PF_GRAVITY;
@@ -1759,9 +1745,13 @@ function dowzaTick(d, level) {
         d.x = level.widthPx - d.w;
         d.vx = 0;
     }
-    // Below-world safety: shouldn't happen (no pits) but defensive
+    // Below-world safety: shouldn't happen in v1 (no pits) but defensive.
+    // Mirror to Engine.state.health and d.alive so the engine's loop.js
+    // gameOver path actually fires -- d.hp alone is invisible to the engine.
     if (d.y > level.heightPx + 64) {
         d.hp = 0;
+        d.alive = false;
+        Engine.state.health = 0;
     }
 
     // ---- Fire input (entity creation lives here so we can set facing/origin) ----
@@ -1773,7 +1763,7 @@ function dowzaTick(d, level) {
 
     // ---- State machine ----
     let next = d.state;
-    if (d.iFrames > 50 && d.state !== 'hurt') {  // first ~10 frames after damage flash as hurt
+    if (d.iFrames > 50) {                  // first ~10 frames after damage flash as hurt
         next = 'hurt';
     } else if (!d.onGround && d.vy < 0) {
         next = 'jump';
@@ -1824,12 +1814,14 @@ function dowzaStompBounce(d) {
 
 const WALKER_W = 12;
 const WALKER_H = 12;
+const WALKER_SPEED = 0.65;          // px/tick magnitude
+const WALKER_DEATH_FRAMES = 18;     // squash-fade duration before splice
 
 function makeWalker(spec) {
     return {
         x: spec.x, y: spec.y,
         prevX: spec.x, prevY: spec.y,
-        vx: -0.65, vy: 0,                 // start moving left
+        vx: -WALKER_SPEED, vy: 0,         // start moving left
         w: WALKER_W, h: WALKER_H,
         patrolMin: spec.patrolMin,
         patrolMax: spec.patrolMax - WALKER_W,  // upper bound is left-edge constraint
@@ -1853,20 +1845,22 @@ function walkerTick(w, level) {
     if (w.vy > PF_MAX_FALL) w.vy = PF_MAX_FALL;
     const hit = PF_moveAndCollide(w, level);
 
-    // Reverse on wall contact
-    if (hit.hitLeft) w.vx = Math.abs(w.vx);
-    if (hit.hitRight) w.vx = -Math.abs(w.vx);
+    // Reverse on wall contact. Use the constant speed magnitude rather than
+    // Math.abs(vx) -- PF_moveAndCollide zeroes vx on the colliding tick, so
+    // Math.abs(0) would freeze the walker forever.
+    if (hit.hitLeft)  w.vx =  WALKER_SPEED;
+    if (hit.hitRight) w.vx = -WALKER_SPEED;
 
-    // Reverse on patrol bounds
-    if (w.x <= w.patrolMin && w.vx < 0) w.vx = Math.abs(w.vx);
-    if (w.x >= w.patrolMax && w.vx > 0) w.vx = -Math.abs(w.vx);
+    // Reverse on patrol bounds (use the same constant for the same reason)
+    if (w.x <= w.patrolMin && w.vx < 0) w.vx =  WALKER_SPEED;
+    if (w.x >= w.patrolMax && w.vx > 0) w.vx = -WALKER_SPEED;
 }
 
 // Resolve player-vs-walker contact. Stomp = walker dies + Dowza bounces.
 // Side touch = Dowza takes a hit. Returns true if the walker should be kept
 // active (alive or in death animation).
 function resolvePlayerWalker(d, w) {
-    if (!w.alive) return w.deathFrames < 18;
+    if (!w.alive) return w.deathFrames < WALKER_DEATH_FRAMES;
     if (!PF_aabbOverlap(d, w)) return true;
 
     // Stomp criterion: previous-frame Dowza-bottom was above walker-top AND
@@ -2057,6 +2051,12 @@ function bowzashineTick(b, dowza, level) {
             if (b.hp <= 0) {
                 b.state = 'DEFEATED';
                 b.stateFrames = 0;
+                // Clear in-flight shines so a stray late blast can't kill
+                // Dowza during the win fanfare and produce a confusing
+                // simultaneous win+gameOver state. Also grant Dowza victory
+                // invulnerability through the rest of the DEFEATED sequence.
+                Engine.shineBlasts = [];
+                if (Engine.player) Engine.player.iFrames = Math.max(Engine.player.iFrames, 200);
                 if (typeof Sound !== 'undefined') Sound.play('bossDefeat');
             } else {
                 b.state = 'SHIELDED';
@@ -2251,10 +2251,10 @@ function resolvePlayerShine(d, s) {
 // =====================================================================
 
 function drawDowza(ctx, d, camX) {
-    if (!d || !d.alive && d.alive !== undefined) {
-        // alive flag: undefined means title-screen fake; false means dead.
-        if (d.alive === false) return;
-    }
+    // alive: undefined means a title-screen / overlay fake (always drawn);
+    // alive === false means an in-game dead Dowza (don't draw).
+    if (!d) return;
+    if (d.alive === false) return;
     const sx = Math.round(d.x - camX);
     const sy = Math.round(d.y);
 
@@ -2394,7 +2394,7 @@ function drawWalker(ctx, w, camX) {
 
     if (!w.alive) {
         // Squash fade: shrink vertically and fade out across deathFrames
-        const t = Math.min(1, w.deathFrames / 18);
+        const t = Math.min(1, w.deathFrames / WALKER_DEATH_FRAMES);
         const sh = Math.max(2, Math.round(WALKER_H * (1 - t * 0.85)));
         const yOff = WALKER_H - sh;
         ctx.fillStyle = `rgba(220, 80, 30, ${(1 - t).toFixed(2)})`;
@@ -2735,6 +2735,15 @@ function physicsTick(dt) {
         Engine.bowzashine = makeBowzashine(LEVEL.arena.bossSpawn.x, LEVEL.arena.bossSpawn.y);
     }
 
+    // Once the arena is locked, prevent Dowza from walking back left of the
+    // gate (camera locks at minTileX*16, so a kid wandering further left
+    // ends up off-screen). The level has no left wall there, so we enforce
+    // a soft barrier here.
+    if (Engine.arenaTriggered && d.x < LEVEL.arena.triggerX) {
+        d.x = LEVEL.arena.triggerX;
+        if (d.vx < 0) d.vx = 0;
+    }
+
     if (Engine.bowzashine) {
         bowzashineTick(Engine.bowzashine, d, LEVEL);
         resolvePlayerBoss(d, Engine.bowzashine);
@@ -2827,25 +2836,68 @@ function drawWinScreen(ctx, w, h, winFrames) {
     ctx.textAlign = 'left';
 }
 
+// ---- Window-blur input clear --------------------------------------------
+//
+// Browsers don't deliver keyup to a defocused window, so a kid alt-tabbing
+// while holding right or jump comes back to a Dowza that's been
+// auto-running. Clear all input flags on blur and visibility-change so the
+// game pauses cleanly. (The animation frame keeps ticking but with no input
+// Dowza decelerates and idles.)
+
+window.addEventListener('blur', function () {
+    if (Engine && Engine.input) {
+        for (const k in Engine.input) Engine.input[k] = false;
+    }
+});
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden && Engine && Engine.input) {
+        for (const k in Engine.input) Engine.input[k] = false;
+    }
+});
+
 // ---- Win-screen restart hook --------------------------------------------
 //
 // The engine's input.js handles restart on the gameOver state. Win is our
 // state, so we add our own listener that fires when the win overlay has been
 // up for >= 60 frames (lockout to avoid accidental skip during the fanfare).
+//
+// Belt-and-suspenders against three real races:
+//   1. shouldRestart() asserts !gameOver && !showTitleScreen so a stale
+//      Engine.win flag can never trigger a phantom restart.
+//   2. keydown stopImmediatePropagation prevents the same Space/W/Up
+//      keypress from also reaching the engine's input handler and setting
+//      Engine.input.jump for the first frame of the new run.
+//   3. Click/touch listener is scoped to gameContainer (and skips taps on
+//      touchControls / muteBtn) so touch-button presses during win don't
+//      bubble to a window-level restart.
 
 (function installWinRestartHook() {
     const winFrameThreshold = 60;
-    function shouldRestart() { return Engine.win && Engine.winFrames > winFrameThreshold; }
+    function shouldRestart() {
+        return Engine.win
+            && Engine.winFrames > winFrameThreshold
+            && !Engine.state.gameOver
+            && !Engine.state.showTitleScreen;
+    }
     document.addEventListener('keydown', function (e) {
         if (!shouldRestart()) return;
         if (['Space', 'Enter', 'KeyJ', 'KeyZ', 'ArrowUp', 'KeyW'].includes(e.code)) {
             e.preventDefault();
+            e.stopImmediatePropagation();
             restartGame();
         }
-    });
-    function tapRestart(e) { if (shouldRestart()) restartGame(); }
-    window.addEventListener('click', tapRestart);
-    window.addEventListener('touchstart', tapRestart, { passive: true });
+    }, true);  // capture phase so we beat the engine's listener
+    function tapRestart(e) {
+        if (!shouldRestart()) return;
+        // Skip taps on the touch buttons / mute button -- those have their
+        // own handlers and shouldn't double-fire as restart.
+        const t = e.target;
+        if (t && t.closest && (t.closest('#touchControls') || t.closest('#muteBtn'))) return;
+        restartGame();
+    }
+    const container = document.getElementById('gameContainer') || document;
+    container.addEventListener('click', tapRestart);
+    container.addEventListener('touchstart', tapRestart, { passive: true });
 })();
 
 // ---- Override engine drawUI to suppress the SCORE label ------------------
