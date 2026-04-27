@@ -185,7 +185,7 @@
 const GAME = {
     title: 'DOWZA',
     subtitle: 'VS. BOWZASHINE',
-    version: 'v1',
+    version: 'v2',
     bgColor: '#3a0a0a',
 
     // Firebase - see README.md for setup instructions
@@ -292,6 +292,23 @@ const Sound = {
             if (!this.ctx) {
                 this.ctx = new (window.AudioContext || window.webkitAudioContext)();
             }
+            // iOS Safari starts AudioContexts in `suspended` state. Creating
+            // the context inside a user-gesture handler isn't enough on its
+            // own -- we have to call resume() inside the same gesture, or
+            // every play() returns silently.
+            if (this.ctx.state === 'suspended' && typeof this.ctx.resume === 'function') {
+                this.ctx.resume();
+            }
+            // Some iOS versions still emit silence on the very first sound
+            // until any buffer has played. Prime the output with a 1-frame
+            // silent buffer so the next real sound is audible.
+            try {
+                const silent = this.ctx.createBuffer(1, 1, 22050);
+                const src = this.ctx.createBufferSource();
+                src.buffer = silent;
+                src.connect(this.ctx.destination);
+                src.start(0);
+            } catch (e) { /* prime is best-effort */ }
             document.removeEventListener('touchstart', initAudio);
             document.removeEventListener('keydown', initAudio);
             document.removeEventListener('click', initAudio);
@@ -1208,6 +1225,34 @@ const SOUNDS = {
         S.playTone(523, 659, 0.12, 'square', 0.3);  // C5 -> E5
         setTimeout(() => S.playTone(659, 784, 0.12, 'square', 0.3), 110);  // E5 -> G5
         setTimeout(() => S.playTone(784, 1047, 0.22, 'square', 0.3), 220); // G5 -> C6
+    },
+
+    // Footstep tick while running. Tiny low-pitched click.
+    footstep: (S) => {
+        S.playTone(140, 100, 0.025, 'square', 0.08);
+    },
+
+    // Landing thud after a jump or fall (only when impact velocity is meaningful).
+    land: (S) => {
+        S.playTone(180, 90, 0.06, 'square', 0.16);
+        S.playNoise(0.04, 400, 100);
+    },
+
+    // Approach-arena rumble. Plays once when Dowza first sees the gate column.
+    arenaApproach: (S) => {
+        S.playNoise(0.5, 220, 80);
+        S.playTone(120, 80, 0.4, 'sawtooth', 0.18);
+    },
+
+    // Boss-volley telegraph. Short shimmer right before shine blasts spawn.
+    shineCharge: (S) => {
+        S.playTone(600, 900, 0.18, 'sine', 0.14);
+    },
+
+    // Fireball wall-spark. Distinct from enemyDie so the kid knows the
+    // fireball missed.
+    fireballWall: (S) => {
+        S.playNoise(0.04, 1200, 600);
     }
 };
 
@@ -1405,87 +1450,105 @@ function PF_cameraSnapX(camera) {
 
 // ---- src/game-level.js ----
 // ==================== LEVEL DATA ====================
-// Hand-authored single level: 80 tiles wide x 14 tiles tall.
-//   Tile size from game-platformer.js: PF_TILE = 16, so level = 1280 x 224 px.
+// Hand-authored single level: 160 tiles wide x 14 tiles tall.
+//   Tile size from game-platformer.js: PF_TILE = 16, so level = 2560 x 224 px.
+//
+// Design rationale (informed by classic SMB 1-1 level-design analysis):
+//   - Mechanics introduced sequentially in safe spaces: run -> stomp -> jump
+//     onto a platform -> fireball -> two-platform jump combo -> cluster ->
+//     long platform sky-bridge -> arena gate -> boss.
+//   - Every visible platform is reachable. Platforms live at row 11 (2 tiles
+//     above ground top), which is well within Dowza's full-hold jump arc
+//     (~3.7 tiles of rise). Decorative-but-unreachable ledges are forbidden.
+//   - Pacing alternates tension (clusters of walkers) with breaks (open
+//     ground). No pits in v1 -- the only hazards are walker contact and
+//     boss attacks.
+//   - Boss arena is the rightmost 28 columns (cols 132-159) so the fight
+//     has room to dodge multi-blast volleys.
 //
 // Tile legend:
 //   . = PF_TILE_EMPTY (sky)
 //   # = PF_TILE_SOLID (stone, collidable)
-//   ~ = PF_TILE_LAVA  (decorative, non-hazardous in v1)
-//
-// Authoring rules:
-//   - Width is exactly 80 columns. Must match LEVEL.widthT.
-//   - Height is 14 rows.
-//   - Boss arena occupies the rightmost 24 columns (columns 56-79). Once Dowza
-//     crosses into the arena, camera locks to those bounds and Bowzashine
-//     spawns. Inside the arena: clean flat floor, no platforms, fire walls
-//     decoratively border the gate at column 56.
-//   - No pits in v1 -- ground is continuous from start to boss arena.
 
-// Level grid. Each row is EXACTLY 80 characters; verified at module load.
+const LEVEL_WIDTH_T = 160;
+
+// Level grid. Each row is EXACTLY 160 characters; verified at module load.
 const LEVEL_ROWS = [
-    "................................................................................", //  0
-    "................................................................................", //  1
-    "................................................................................", //  2
-    "................................................................................", //  3
-    "................................................................................", //  4
-    "................................................................................", //  5
-    ".......###......................................................................", //  6 small platform
-    "..........................###...###.............................................", //  7 jump combo
-    "................................................................................", //  8
-    "..............###...............................................................", //  9 tall ledge
-    "................................................................................", // 10
-    "......................................###.......................................", // 11 mid platform
-    "................................................................................", // 12 sky
-    "################################################################################"  // 13 ground (continuous)
+    "................................................................................................................................................................", //  0 sky
+    "................................................................................................................................................................", //  1
+    "................................................................................................................................................................", //  2
+    "................................................................................................................................................................", //  3
+    "................................................................................................................................................................", //  4
+    "................................................................................................................................................................", //  5
+    "................................................................................................................................................................", //  6
+    "................................................................................................................................................................", //  7
+    "................................................................................................................................................................", //  8
+    "................................................................................................................................................................", //  9
+    "................................................................................................................................................................", // 10
+    "..............#####...........................####...####.........######................#####.............########............###...............................", // 11 reachable platforms
+    "................................................................................................................................................................", // 12
+    "################################################################################################################################################################"  // 13 ground (continuous, no pits)
 ];
 
 // Catch typos at boot rather than at runtime collision math.
 LEVEL_ROWS.forEach((r, i) => {
-    if (r.length !== 80) console.error(`LEVEL row ${i} has length ${r.length}, expected 80`);
+    if (r.length !== LEVEL_WIDTH_T) {
+        console.error(`LEVEL row ${i} has length ${r.length}, expected ${LEVEL_WIDTH_T}`);
+    }
 });
 
 // Convert character grid into integer tile grid the platformer expects.
 function _buildLevelTiles() {
-    const map = { '.': 0 /*PF_TILE_EMPTY*/, '#': 1 /*PF_TILE_SOLID*/, '~': 2 /*PF_TILE_LAVA*/ };
+    const map = { '.': 0 /*PF_TILE_EMPTY*/, '#': 1 /*PF_TILE_SOLID*/ };
     return LEVEL_ROWS.map(row => row.split('').map(ch => map[ch] != null ? map[ch] : 0));
 }
 
 const LEVEL = {
     tiles: _buildLevelTiles(),
-    widthT: 80,
+    widthT: LEVEL_WIDTH_T,
     heightT: 14,
-    widthPx: 80 * 16,
+    widthPx: LEVEL_WIDTH_T * 16,
     heightPx: 14 * 16,
 
     // Ground row 13 -> tile top y = 208. Entities standing on the ground place
     // their AABB top at (208 - entity.h).
-    // Player spawn (world pixels; Dowza's top-left)
     playerSpawn: { x: 24, y: 13 * 16 - 16 },  // 192: bottom rests at y=208
 
-    // Walker enemies along the route. Each: {x, y, patrolMin, patrolMax} in pixels.
-    // y places walker bottom at ground top (208), so y = 208 - WALKER_H = 196.
+    // Walker enemies along the route. Each: {x, y, patrolMin, patrolMax} in
+    // pixels. y places walker bottom at ground top (208), so y = 208 - 12 = 196.
+    //
+    // Walker placement maps to the level's pacing sections:
+    //   Section 1 (0-12):    1 walker (intro)
+    //   Section 2 (12-26):   1 walker (under first platform)
+    //   Section 3 (26-44):   2 walkers (open ground, fireball / stomp practice)
+    //   Section 4 (44-62):   1 walker (jump-combo bypass)
+    //   Section 5 (62-82):   2 walkers (denser cluster below sky-bridge)
+    //   Section 6 (82-102):  2 walkers (cluster + bypass platform)
+    //   Section 7 (102-122): 1 walker on long sky-bridge ground
+    //   Section 8 (122-130): 1 walker before the gate
     walkerSpawns: [
-        { x: 10 * 16, y: 13 * 16 - 12, patrolMin:  8 * 16, patrolMax: 14 * 16 },
-        { x: 22 * 16, y: 13 * 16 - 12, patrolMin: 20 * 16, patrolMax: 27 * 16 },
-        { x: 34 * 16, y: 13 * 16 - 12, patrolMin: 32 * 16, patrolMax: 40 * 16 },
-        { x: 43 * 16, y: 13 * 16 - 12, patrolMin: 41 * 16, patrolMax: 47 * 16 },
-        { x: 49 * 16, y: 13 * 16 - 12, patrolMin: 47 * 16, patrolMax: 52 * 16 },
-        { x: 53 * 16, y: 13 * 16 - 12, patrolMin: 52 * 16, patrolMax: 55 * 16 }
+        { x:   8 * 16, y: 13 * 16 - 12, patrolMin:   4 * 16, patrolMax:  12 * 16 },  // 1
+        { x:  22 * 16, y: 13 * 16 - 12, patrolMin:  18 * 16, patrolMax:  26 * 16 },  // 2
+        { x:  30 * 16, y: 13 * 16 - 12, patrolMin:  27 * 16, patrolMax:  34 * 16 },  // 3
+        { x:  40 * 16, y: 13 * 16 - 12, patrolMin:  37 * 16, patrolMax:  44 * 16 },  // 4
+        { x:  58 * 16, y: 13 * 16 - 12, patrolMin:  44 * 16, patrolMax:  62 * 16 },  // 5 -- patrols across jump-combo
+        { x:  74 * 16, y: 13 * 16 - 12, patrolMin:  64 * 16, patrolMax:  78 * 16 },  // 6
+        { x:  86 * 16, y: 13 * 16 - 12, patrolMin:  82 * 16, patrolMax:  92 * 16 },  // 7
+        { x:  96 * 16, y: 13 * 16 - 12, patrolMin:  93 * 16, patrolMax: 102 * 16 },  // 8
+        { x: 116 * 16, y: 13 * 16 - 12, patrolMin: 102 * 16, patrolMax: 122 * 16 },  // 9 -- patrols under long sky-bridge
+        { x: 128 * 16, y: 13 * 16 - 12, patrolMin: 124 * 16, patrolMax: 131 * 16 }   // 10 -- last walker before arena
     ],
 
-    // Boss arena: rightmost 24 columns (cols 56-79). Camera locks to these
+    // Boss arena: rightmost 28 columns (cols 132-159). Camera locks to these
     // bounds when Dowza enters. Bowzashine spawns near the right wall.
     arena: {
-        triggerX: 56 * 16,        // crossing this world-x activates the arena
-        minTileX: 56,
-        maxTileX: 79,
-        cameraLockMin: 56 * 16,
-        cameraLockMax: (80 * 16) - 384,
+        triggerX: 132 * 16,
+        minTileX: 132,
+        maxTileX: 159,
+        cameraLockMin: 132 * 16,
+        cameraLockMax: (160 * 16) - 384,
         // Boss bottom rests at ground top (208), so y = 208 - BOWZA_H (40) = 168.
-        // (BOWZA_H is declared in game-entities.js; we hardcode 40 here to avoid
-        // a load-order dependency at module-init time.)
-        bossSpawn: { x: 72 * 16, y: 13 * 16 - 40 }
+        bossSpawn: { x: 150 * 16, y: 13 * 16 - 40 }
     }
 };
 
@@ -1662,6 +1725,9 @@ function makeDowza(spawnX, spawnY) {
         stateFrames: 0,
         animFrame: 0,
         alive: true,
+        prevOnGround: true,   // for landing-detection on air->ground transition
+        prevVyForLand: 0,     // landing impact velocity (pre-collision-zero)
+        footstepFrame: 0,     // rolling counter for footstep cadence
         // Win-state freeze: when set, Dowza stops accepting input and idles
         frozen: false
     };
@@ -1736,8 +1802,31 @@ function dowzaTick(d, level) {
     d.vy += PF_GRAVITY;
     if (d.vy > PF_MAX_FALL) d.vy = PF_MAX_FALL;
 
+    // Snapshot impact velocity before collision can zero it -- used to
+    // decide whether the landing sound is worth playing.
+    d.prevVyForLand = d.vy;
+
     // ---- Move + collide ----
     PF_moveAndCollide(d, level);
+
+    // ---- Landing thud: airborne -> ground transition with meaningful vy ----
+    if (d.onGround && !d.prevOnGround && d.prevVyForLand > 1.6) {
+        if (typeof Sound !== 'undefined') Sound.play('land');
+    }
+    d.prevOnGround = d.onGround;
+
+    // ---- Footstep cadence: tick a counter while running on the ground ----
+    if (d.onGround && Math.abs(d.vx) > 0.6) {
+        d.footstepFrame++;
+        // Step every ~14 ticks at full run speed (slows automatically when
+        // vx is smaller because we only increment when moving).
+        if (d.footstepFrame >= 14) {
+            d.footstepFrame = 0;
+            if (typeof Sound !== 'undefined') Sound.play('footstep');
+        }
+    } else {
+        d.footstepFrame = 13; // primed so the next step fires within ~1 frame
+    }
 
     // Clamp horizontally to level bounds (no falling off the world)
     if (d.x < 0) { d.x = 0; d.vx = 0; }
@@ -1930,6 +2019,7 @@ function fireballTick(fb, level) {
     const ty = Math.floor((fb.y + fb.h / 2) / PF_TILE);
     if (PF_isSolid(level, tx, ty)) {
         fb.alive = false;
+        if (typeof Sound !== 'undefined') Sound.play('fireballWall');
         // Wall sparks
         for (let i = 0; i < 4; i++) {
             Engine.spawnParticle(
@@ -2026,6 +2116,11 @@ function bowzashineTick(b, dowza, level) {
     if (b.state === 'SHIELDED') {
         b.y = groundY + Math.sin(b.animFrame * 0.05) * 1.5;
         b.attackTimer--;
+        // Pre-volley telegraph: 12 frames before each volley, play a charge
+        // cue so the kid hears the attack coming and can dodge.
+        if (b.attackTimer === 12) {
+            if (typeof Sound !== 'undefined') Sound.play('shineCharge');
+        }
         if (b.attackTimer <= 0) {
             spawnShineVolley(b, dowza);
             b.attackTimer = 130;
@@ -2733,6 +2828,7 @@ function physicsTick(dt) {
         Engine.camera.lockMin = LEVEL.arena.cameraLockMin;
         Engine.camera.lockMax = LEVEL.arena.cameraLockMax;
         Engine.bowzashine = makeBowzashine(LEVEL.arena.bossSpawn.x, LEVEL.arena.bossSpawn.y);
+        if (typeof Sound !== 'undefined') Sound.play('arenaApproach');
     }
 
     // Once the arena is locked, prevent Dowza from walking back left of the

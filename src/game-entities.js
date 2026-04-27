@@ -37,6 +37,9 @@ function makeDowza(spawnX, spawnY) {
         stateFrames: 0,
         animFrame: 0,
         alive: true,
+        prevOnGround: true,   // for landing-detection on air->ground transition
+        prevVyForLand: 0,     // landing impact velocity (pre-collision-zero)
+        footstepFrame: 0,     // rolling counter for footstep cadence
         // Win-state freeze: when set, Dowza stops accepting input and idles
         frozen: false
     };
@@ -111,8 +114,31 @@ function dowzaTick(d, level) {
     d.vy += PF_GRAVITY;
     if (d.vy > PF_MAX_FALL) d.vy = PF_MAX_FALL;
 
+    // Snapshot impact velocity before collision can zero it -- used to
+    // decide whether the landing sound is worth playing.
+    d.prevVyForLand = d.vy;
+
     // ---- Move + collide ----
     PF_moveAndCollide(d, level);
+
+    // ---- Landing thud: airborne -> ground transition with meaningful vy ----
+    if (d.onGround && !d.prevOnGround && d.prevVyForLand > 1.6) {
+        if (typeof Sound !== 'undefined') Sound.play('land');
+    }
+    d.prevOnGround = d.onGround;
+
+    // ---- Footstep cadence: tick a counter while running on the ground ----
+    if (d.onGround && Math.abs(d.vx) > 0.6) {
+        d.footstepFrame++;
+        // Step every ~14 ticks at full run speed (slows automatically when
+        // vx is smaller because we only increment when moving).
+        if (d.footstepFrame >= 14) {
+            d.footstepFrame = 0;
+            if (typeof Sound !== 'undefined') Sound.play('footstep');
+        }
+    } else {
+        d.footstepFrame = 13; // primed so the next step fires within ~1 frame
+    }
 
     // Clamp horizontally to level bounds (no falling off the world)
     if (d.x < 0) { d.x = 0; d.vx = 0; }
@@ -305,6 +331,7 @@ function fireballTick(fb, level) {
     const ty = Math.floor((fb.y + fb.h / 2) / PF_TILE);
     if (PF_isSolid(level, tx, ty)) {
         fb.alive = false;
+        if (typeof Sound !== 'undefined') Sound.play('fireballWall');
         // Wall sparks
         for (let i = 0; i < 4; i++) {
             Engine.spawnParticle(
@@ -401,6 +428,11 @@ function bowzashineTick(b, dowza, level) {
     if (b.state === 'SHIELDED') {
         b.y = groundY + Math.sin(b.animFrame * 0.05) * 1.5;
         b.attackTimer--;
+        // Pre-volley telegraph: 12 frames before each volley, play a charge
+        // cue so the kid hears the attack coming and can dodge.
+        if (b.attackTimer === 12) {
+            if (typeof Sound !== 'undefined') Sound.play('shineCharge');
+        }
         if (b.attackTimer <= 0) {
             spawnShineVolley(b, dowza);
             b.attackTimer = 130;

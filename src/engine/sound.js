@@ -15,6 +15,23 @@ const Sound = {
             if (!this.ctx) {
                 this.ctx = new (window.AudioContext || window.webkitAudioContext)();
             }
+            // iOS Safari starts AudioContexts in `suspended` state. Creating
+            // the context inside a user-gesture handler isn't enough on its
+            // own -- we have to call resume() inside the same gesture, or
+            // every play() returns silently.
+            if (this.ctx.state === 'suspended' && typeof this.ctx.resume === 'function') {
+                this.ctx.resume();
+            }
+            // Some iOS versions still emit silence on the very first sound
+            // until any buffer has played. Prime the output with a 1-frame
+            // silent buffer so the next real sound is audible.
+            try {
+                const silent = this.ctx.createBuffer(1, 1, 22050);
+                const src = this.ctx.createBufferSource();
+                src.buffer = silent;
+                src.connect(this.ctx.destination);
+                src.start(0);
+            } catch (e) { /* prime is best-effort */ }
             document.removeEventListener('touchstart', initAudio);
             document.removeEventListener('keydown', initAudio);
             document.removeEventListener('click', initAudio);

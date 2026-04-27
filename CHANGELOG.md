@@ -1,5 +1,47 @@
 # Changelog
 
+## v2 — Bigger level, audio-rich, iPad-fixed
+
+**What changed**
+
+- **Sound on iPad** — `src/engine/sound.js` now calls `ctx.resume()` and
+  primes the audio output with a 1-frame silent buffer inside the first-
+  gesture handler. iOS Safari starts every AudioContext in `suspended`
+  state, so creating it on tap was not enough -- every `play()` returned
+  silently. Verified by reading the page on a desktop bundle; iPad fix is
+  the same code path so should land for Leo on the next deploy.
+- **Level redesigned and 2x longer** — the level grew from 80 tiles
+  (~16s of running) to 160 tiles (~25s plus boss) and was rebuilt around
+  the SMB 1-1 progressive-introduction pattern: section 1 teaches running,
+  section 2 introduces the first reachable platform, section 3 has open
+  ground for stomp/fireball practice, section 4 a two-platform jump
+  combo, sections 5-6 walker clusters with bypass platforms, section 7 a
+  long sky-bridge, section 8 an arena ramp. **Every visible platform is
+  now reachable** -- they all sit at row 11 (2 tiles above ground), well
+  inside Dowza's 60px-rise full-hold jump arc. The previous level had
+  decorative platforms 4-7 tiles up that nothing could reach; those were
+  the "platforms make no sense" Leo flagged.
+- **Walker count grew from 6 to 10** spread across the longer level so
+  pacing alternates tension (clusters) with breaks (open ground).
+- **Boss arena widened** from 24 tiles to 28 to give the player more room
+  to dodge multi-blast volleys.
+- **More audio cues** so what's happening on screen is also audible:
+  - `footstep` ticks every ~14 frames while running on the ground
+  - `land` plays on air-to-ground transitions with meaningful impact velocity
+  - `arenaApproach` rumble fires once when the camera locks
+  - `shineCharge` pre-volley telegraph fires 12 frames before each shine volley
+  - `fireballWall` distinct from `enemyDie` so the kid can hear when a fireball missed
+
+**Why**
+
+Three pieces of feedback from playing v1: (1) no sound on iPad, (2) the
+level felt short and hard to read, (3) some platforms looked like they
+should be jumpable but weren't, which made the level feel arbitrary.
+Research surfaced the canonical SMB 1-1 pattern (every visible affordance
+is interactive; mechanics introduced in safe spaces before being
+combined; pacing alternates tension and breaks) and the iOS Safari
+AudioContext-suspended bug. v2 applies all three.
+
 ## v1 — First playable: Dowza vs. Bowzashine
 
 **What changed**

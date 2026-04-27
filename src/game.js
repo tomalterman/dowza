@@ -75,6 +75,7 @@ function physicsTick(dt) {
         Engine.camera.lockMin = LEVEL.arena.cameraLockMin;
         Engine.camera.lockMax = LEVEL.arena.cameraLockMax;
         Engine.bowzashine = makeBowzashine(LEVEL.arena.bossSpawn.x, LEVEL.arena.bossSpawn.y);
+        if (typeof Sound !== 'undefined') Sound.play('arenaApproach');
     }
 
     // Once the arena is locked, prevent Dowza from walking back left of the

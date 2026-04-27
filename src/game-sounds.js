@@ -78,5 +78,33 @@ const SOUNDS = {
         S.playTone(523, 659, 0.12, 'square', 0.3);  // C5 -> E5
         setTimeout(() => S.playTone(659, 784, 0.12, 'square', 0.3), 110);  // E5 -> G5
         setTimeout(() => S.playTone(784, 1047, 0.22, 'square', 0.3), 220); // G5 -> C6
+    },
+
+    // Footstep tick while running. Tiny low-pitched click.
+    footstep: (S) => {
+        S.playTone(140, 100, 0.025, 'square', 0.08);
+    },
+
+    // Landing thud after a jump or fall (only when impact velocity is meaningful).
+    land: (S) => {
+        S.playTone(180, 90, 0.06, 'square', 0.16);
+        S.playNoise(0.04, 400, 100);
+    },
+
+    // Approach-arena rumble. Plays once when Dowza first sees the gate column.
+    arenaApproach: (S) => {
+        S.playNoise(0.5, 220, 80);
+        S.playTone(120, 80, 0.4, 'sawtooth', 0.18);
+    },
+
+    // Boss-volley telegraph. Short shimmer right before shine blasts spawn.
+    shineCharge: (S) => {
+        S.playTone(600, 900, 0.18, 'sine', 0.14);
+    },
+
+    // Fireball wall-spark. Distinct from enemyDie so the kid knows the
+    // fireball missed.
+    fireballWall: (S) => {
+        S.playNoise(0.04, 1200, 600);
     }
 };
